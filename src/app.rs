@@ -6,7 +6,9 @@ use log::*;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
 use vulkanalia::prelude::v1_0::*;
 
-use vulkanalia::vk::{DebugUtilsMessengerCreateInfoEXTBuilder, Device, ExtDebugUtilsExtension};
+use vulkanalia::vk::{
+    DebugUtilsMessengerCreateInfoEXTBuilder, Device, ExtDebugUtilsExtension, KhrSurfaceExtension,
+};
 use vulkanalia::{vk, Entry, Instance};
 
 use winit::window::Window;
@@ -92,6 +94,7 @@ impl App {
 
         let instance = unsafe { entry.create_instance(&info, None)? };
 
+        let surface = unsafe { vk_window::create_surface(&instance, &window, &window)? };
         let data = AppData::builder()
             .validation(&instance, &debug_info)?
             .find_physical_device(&instance)?
@@ -114,11 +117,16 @@ impl App {
     }
 
     pub unsafe fn destroy(&mut self) {
-        if let Some(msgr) = self.data.messenger {
-            self.instance.destroy_debug_utils_messenger_ext(msgr, None);
-        }
-        if let Some(ld) = self.data.logical_device.clone() {
+        if let AppData {
+            messenger: Some(msgr),
+            logical_device: Some(ld),
+            surface: Some(surface),
+            ..
+        } = self.data.clone()
+        {
+            self.instance.destroy_debug_utils_messenger_ext(*msgr, None);
             ld.destroy_device(None);
+            self.instance.destroy_surface_khr(*surface, None);
         }
         self.instance.destroy_instance(None);
     }
@@ -136,11 +144,12 @@ impl Drop for App {
 
 #[derive(Clone, Debug, Default)]
 pub struct AppData {
-    messenger: Option<vk::DebugUtilsMessengerEXT>,
-    physical_device: Option<vk::PhysicalDevice>,
+    messenger: Option<Box<vk::DebugUtilsMessengerEXT>>,
+    physical_device: Option<Rc<vk::PhysicalDevice>>,
     logical_device: Option<Rc<vulkanalia::Device>>,
-    gfx_queue: Option<vk::Queue>,
+    gfx_queue: Option<Box<vk::Queue>>,
     surface: Option<Rc<vk::SurfaceKHR>>,
+    present_queue: Option<Box<vk::Queue>>,
 }
 
 impl AppData {
@@ -151,6 +160,7 @@ impl AppData {
             logical_device: None,
             gfx_queue: None,
             surface: None,
+            present_queue: None,
         }
     }
 
@@ -163,6 +173,16 @@ impl AppData {
             Ok(sh)
         } else {
             Err(anyhow!("SurfaceKHR not found on AppData for Application"))
+        }
+    }
+
+    pub fn physical_device(&self) -> Result<Rc<vk::PhysicalDevice>> {
+        if let Some(pd) = self.physical_device.clone() {
+            Ok(pd)
+        } else {
+            Err(anyhow!(
+                "PhysicalDevice not found on AppData for Application"
+            ))
         }
     }
 }
@@ -182,7 +202,7 @@ impl AppDataBuilder {
     ) -> Result<Self> {
         let messenger = unsafe { instance.create_debug_utils_messenger_ext(&debug_info, None)? };
         Ok(Self(Box::new(AppData {
-            messenger: Some(messenger),
+            messenger: Some(Box::new(messenger)),
             ..*self.0
         })))
     }
@@ -199,7 +219,7 @@ impl AppDataBuilder {
                 } else {
                     info!("Selected physical device (`{}`)", props.device_name);
                     return Ok(Self(Box::new(AppData {
-                        physical_device: Some(physical_device),
+                        physical_device: Some(Rc::new(physical_device)),
                         ..*self.0
                     })));
                 }
@@ -214,35 +234,44 @@ impl AppDataBuilder {
         let exts = default_extensions();
         let features = vk::PhysicalDeviceFeatures::builder();
 
-        let physical_device = self
-            .0
-            .physical_device
-            .expect("Failed to find physical device on AppData.");
-        let device_indicies = PhysicalDeviceIndicies::new(
-            instance,
-            &self.0,
-            self.0
-                .physical_device
-                .expect("Failed to find physical device on AppData."),
-        )?;
+        let physical_device = self.0.physical_device()?;
+        let device_indicies =
+            PhysicalDeviceIndicies::new(instance, &self.0, *self.0.physical_device()?)?;
+
+        let unique_indices = {
+            let mut uis = HashSet::new();
+            uis.insert(device_indicies.gfx);
+            uis.insert(device_indicies.present);
+            uis
+        };
+
         let queue_priorities = &[1.0];
         let queue_info = vk::DeviceQueueCreateInfo::builder()
             .queue_family_index(device_indicies.gfx)
             .queue_priorities(queue_priorities);
 
-        let queue_infos = &[queue_info];
+        let queue_infos = unique_indices
+            .iter()
+            .map(|i| {
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(*i)
+                    .queue_priorities(queue_priorities)
+            })
+            .collect::<Vec<_>>();
         let info = vk::DeviceCreateInfo::builder()
-            .queue_create_infos(queue_infos)
+            .queue_create_infos(&queue_infos)
             .enabled_layer_names(&layers)
             .enabled_extension_names(&exts)
             .enabled_features(&features)
             .build();
 
-        let device = unsafe { instance.create_device(physical_device, &info, None)? };
+        let device = unsafe { instance.create_device(*physical_device, &info, None)? };
         let gfx_queue = unsafe { device.get_device_queue(device_indicies.gfx, 0) };
+        let present_queue = unsafe { device.get_device_queue(device_indicies.present, 0) };
         Ok(Self(Box::new(AppData {
             logical_device: Some(Rc::new(device)),
-            gfx_queue: Some(gfx_queue),
+            gfx_queue: Some(Box::new(gfx_queue)),
+            present_queue: Some(Box::new(present_queue)),
             ..*self.0
         })))
     }
