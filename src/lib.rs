@@ -1,7 +1,10 @@
+use std::ops::Range;
+
 use cgmath::prelude::*;
 use eng::hooks::{FrameUpdate, WindowEventHandler};
 use gfx::{
     camera::{Camera, CameraControl, CameraUniform, PlayerCamera},
+    model::Mesh,
     wgpu::{
         buffer::{Instance, InstanceRaw},
         texture::Texture,
@@ -15,7 +18,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use wgpu::util::DeviceExt;
+use wgpu::{util::DeviceExt, RenderPass};
 
 mod eng;
 mod gfx;
@@ -371,6 +374,26 @@ impl GfxState {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = self.create_depth_texture(Some("Depth Texture"));
         }
+    }
+
+    fn draw_mesh<'a, 'b>(&mut self, rp: &mut RenderPass<'a>, mesh: &'b Mesh)
+    where
+        'b: 'a,
+    {
+        self.draw_mesh_instanced(rp, mesh, 0..1);
+    }
+
+    fn draw_mesh_instanced<'a, 'b>(
+        &mut self,
+        rp: &mut RenderPass<'a>,
+        mesh: &'b Mesh,
+        instances: Range<u32>,
+    ) where
+        'b: 'a,
+    {
+        rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
+        rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
+        rp.draw_indexed(0..mesh.num_elements, 0, instances);
     }
 
     pub fn texture_from_bytes(&self, bytes: &[u8], label: Option<&str>) -> anyhow::Result<Texture> {
