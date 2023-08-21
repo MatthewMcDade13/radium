@@ -1,7 +1,12 @@
+use cgmath::prelude::*;
+use eng::hooks::{FrameUpdate, WindowEventHandler};
 use gfx::{
-    camera::{Camera, CameraUniform},
-    texture::Texture,
-    vertex::Vertex,
+    camera::{Camera, CameraControl, CameraUniform, PlayerCamera},
+    wgpu::{
+        buffer::{Instance, InstanceRaw},
+        texture::Texture,
+        vertex::Vertex,
+    },
 };
 use winit::{
     dpi::PhysicalSize,
@@ -16,26 +21,38 @@ mod eng;
 mod gfx;
 mod sys;
 
+const NUM_INSTANCES_PER_ROW: u32 = 10;
+const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+    0.,
+    NUM_INSTANCES_PER_ROW as f32 * 0.5,
+);
+
 const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
         tex_coords: [0.4131759, 0.00759614],
+        normal: [1., 1., 1.],
     }, // A
     Vertex {
         position: [-0.49513406, 0.06958647, 0.0],
         tex_coords: [0.0048659444, 0.43041354],
+        normal: [1., 1., 1.],
     }, // B
     Vertex {
         position: [-0.21918549, -0.44939706, 0.0],
         tex_coords: [0.28081453, 0.949397],
+        normal: [1., 1., 1.],
     }, // C
     Vertex {
         position: [0.35966998, -0.3473291, 0.0],
         tex_coords: [0.85967, 0.84732914],
+        normal: [1., 1., 1.],
     }, // D
     Vertex {
         position: [0.44147372, 0.2347359, 0.0],
         tex_coords: [0.9414737, 0.2652641],
+        normal: [1., 1., 1.],
     }, // E
 ];
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
@@ -54,10 +71,14 @@ pub struct GfxState {
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: Texture,
 
-    camera: Camera,
-    cam_uniform: CameraUniform,
+    camera: PlayerCamera,
     cam_buffer: wgpu::Buffer,
     cam_bind_group: wgpu::BindGroup,
+
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
+
+    depth_texture: Texture,
 }
 
 impl GfxState {
@@ -199,6 +220,12 @@ impl GfxState {
             label: Some("camera_bind_group"),
         });
 
+        let player_cam = PlayerCamera {
+            cam: camera,
+            uniform: cam_uniform,
+            ctrl: CameraControl::new(0.2),
+        };
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/basic.wgsl").into()),
@@ -217,7 +244,7 @@ impl GfxState {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::buf_layout()],
+                buffers: &[Vertex::buffer_layout(), InstanceRaw::buffer_layout()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -241,7 +268,13 @@ impl GfxState {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -264,6 +297,36 @@ impl GfxState {
 
         let num_indices = INDICES.len() as u32;
 
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let position = cgmath::Vector3 {
+                        x: x as f32,
+                        y: 0.,
+                        z: z as f32,
+                    } - INSTANCE_DISPLACEMENT;
+
+                    let rotation = if position.is_zero() {
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
+
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let depth_texture = Texture::depth_texture(&device, &config, "Depth Texture".into());
+
         Ok(Self {
             window,
             surface,
@@ -271,7 +334,7 @@ impl GfxState {
             queue,
             config,
             size,
-            cam_uniform,
+            camera: player_cam,
             cam_buffer,
             cam_bind_group,
             clear_color: wgpu::Color {
@@ -286,7 +349,9 @@ impl GfxState {
             index_buffer,
             diffuse_bind_group,
             diffuse_texture,
-            camera,
+            instances,
+            instance_buffer,
+            depth_texture,
         })
     }
 
@@ -304,6 +369,7 @@ impl GfxState {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture = self.create_depth_texture(Some("Depth Texture"));
         }
     }
 
@@ -311,13 +377,23 @@ impl GfxState {
         Texture::from_bytes(&self.device, &self.queue, bytes, label)
     }
 
+    pub fn create_depth_texture(&self, label: Option<&str>) -> Texture {
+        Texture::depth_texture(&self.device, &self.config, label)
+    }
+
     /// return true if finished with polling inputs
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        self.camera.handle_window_events(event)
     }
 
     pub fn update(&mut self) {
-        // todo!()
+        self.camera.frame_update(1.0);
+        self.camera.uniform = CameraUniform::from_camera(&self.camera.cam);
+        self.queue.write_buffer(
+            &self.cam_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera.uniform]),
+        );
     }
 
     pub fn set_clear_color(&mut self, color: wgpu::Color) {
@@ -346,14 +422,22 @@ impl GfxState {
                         store: true,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
             });
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.cam_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

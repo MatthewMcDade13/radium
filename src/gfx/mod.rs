@@ -1,4 +1,3 @@
 pub mod camera;
-pub mod texture;
-
-pub mod vertex;
+pub mod model;
+pub mod wgpu;

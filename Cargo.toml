@@ -17,6 +17,12 @@ cgmath = "0.18.0"
 env_logger = "0.10.0"
 image = "0.24.7"
 log = "0.4.19"
+tobj = { version = "4.0.0", features = ["async"] }
 wgpu = "0.17.0"
 winit = "0.28.6"
+
+[build-dependencies]
+anyhow = "1.0"
+fs_extra = "1.2"
+glob = "0.3"
  

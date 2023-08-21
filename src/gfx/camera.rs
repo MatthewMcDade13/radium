@@ -76,9 +76,9 @@ impl CameraControl {
 
 #[derive(Debug, Copy, Clone)]
 pub struct PlayerCamera {
-    cam: Camera,
-    uniform: CameraUniform,
-    ctrl: CameraControl,
+    pub cam: Camera,
+    pub uniform: CameraUniform,
+    pub ctrl: CameraControl,
 }
 
 impl PlayerCamera {}
