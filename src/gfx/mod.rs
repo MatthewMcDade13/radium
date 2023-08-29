@@ -1,4 +1,4 @@
 pub mod camera;
+pub mod light;
 pub mod model;
 pub mod wgpu;
-const TEMP: u32 = 0;
