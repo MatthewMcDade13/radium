@@ -1,4 +1,5 @@
 use wgpu::VertexAttribute;
+const TEMP: u32 = 0;
 
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,

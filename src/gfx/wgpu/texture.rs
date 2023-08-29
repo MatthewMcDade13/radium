@@ -1,5 +1,6 @@
 use anyhow::*;
 use image::GenericImageView;
+const TEMP: u32 = 0;
 
 pub struct Texture {
     pub handle: wgpu::Texture,

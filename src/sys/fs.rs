@@ -1,4 +1,5 @@
 use std::io::{BufReader, Cursor};
+const TEMP: u32 = 0;
 
 use cfg_if::cfg_if;
 use wgpu::util::DeviceExt;

@@ -1,4 +1,5 @@
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+const TEMP: u32 = 0;
 
 use crate::{
     eng::hooks::{FrameUpdate, WindowEventHandler},

@@ -1,4 +1,5 @@
 use winit::event::WindowEvent;
+const TEMP: u32 = 0;
 
 pub trait WindowEventHandler {
     fn handle_window_events(&mut self, event: &WindowEvent) -> bool;

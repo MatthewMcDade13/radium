@@ -1,4 +1,4 @@
-
+const TEMP: u32 = 0;
 struct CameraUniform {
   view_proj: mat4x4<f32>,
 }

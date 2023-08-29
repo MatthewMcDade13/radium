@@ -1,4 +1,5 @@
 use std::ops::Range;
+const TEMP: u32 = 0;
 
 use cgmath::prelude::*;
 use eng::hooks::{FrameUpdate, WindowEventHandler};

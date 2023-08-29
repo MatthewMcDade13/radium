@@ -18,3 +18,4 @@ pub struct Material {
     pub diffuse_texture: Texture,
     pub bind_group: wgpu::BindGroup,
 }
+const TEMP: u32 = 0;
