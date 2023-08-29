@@ -5,13 +5,14 @@ use cgmath::prelude::*;
 use eng::hooks::{FrameUpdate, WindowEventHandler};
 use gfx::{
     camera::{Camera, CameraControl, CameraUniform, PlayerCamera},
-    model::Mesh,
+    model::{Material, Mesh, Model},
     wgpu::{
         buffer::{Instance, InstanceRaw},
         texture::Texture,
         vertex::Vertex,
     },
 };
+use sys::fs::load_model;
 use winit::{
     dpi::PhysicalSize,
     event::*,
@@ -83,6 +84,7 @@ pub struct GfxState {
     instance_buffer: wgpu::Buffer,
 
     depth_texture: Texture,
+    obj_model: Model,
 }
 
 impl GfxState {
@@ -301,14 +303,14 @@ impl GfxState {
 
         let num_indices = INDICES.len() as u32;
 
+        const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
 
                     let rotation = if position.is_zero() {
                         cgmath::Quaternion::from_axis_angle(
@@ -330,6 +332,7 @@ impl GfxState {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let depth_texture = Texture::depth_texture(&device, &config, "Depth Texture".into());
+        let obj_model = load_model("cube.obj", &device, &queue, &texture_bind_group_layout).await?;
 
         Ok(Self {
             window,
@@ -356,6 +359,7 @@ impl GfxState {
             instances,
             instance_buffer,
             depth_texture,
+            obj_model,
         })
     }
 
@@ -377,24 +381,59 @@ impl GfxState {
         }
     }
 
-    fn draw_mesh<'a, 'b>(&mut self, rp: &mut RenderPass<'a>, mesh: &'b Mesh)
-    where
-        'b: 'a,
-    {
-        self.draw_mesh_instanced(rp, mesh, 0..1);
-    }
-
-    fn draw_mesh_instanced<'a, 'b>(
-        &mut self,
+    pub fn draw_mesh<'a, 'b>(
+        &self,
         rp: &mut RenderPass<'a>,
         mesh: &'b Mesh,
+        mat: &'b Material,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) where
+        'b: 'a,
+    {
+        self.draw_mesh_instanced(rp, mesh, mat, 0..1, camera_bind_group);
+    }
+
+    pub fn draw_mesh_instanced<'a, 'b>(
+        &self,
+        rp: &mut RenderPass<'a>,
+        mesh: &'b Mesh,
+        mat: &'b Material,
         instances: Range<u32>,
+        camera_bind_group: &'b wgpu::BindGroup,
     ) where
         'b: 'a,
     {
         rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
         rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
+        rp.set_bind_group(0, &mat.bind_group, &[]);
+        rp.set_bind_group(1, camera_bind_group, &[]);
         rp.draw_indexed(0..mesh.num_elements, 0, instances);
+    }
+
+    pub fn draw_model<'a, 'b>(
+        &self,
+        rp: &mut RenderPass<'a>,
+        model: &'b Model,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) where
+        'b: 'a,
+    {
+        self.draw_model_instanced(rp, model, 0..1, camera_bind_group);
+    }
+
+    pub fn draw_model_instanced<'a, 'b>(
+        &self,
+        rp: &mut RenderPass<'a>,
+        model: &'b Model,
+        instances: Range<u32>,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) where
+        'b: 'a,
+    {
+        for mesh in &model.meshes {
+            let mat = &model.materials[mesh.material];
+            self.draw_mesh_instanced(rp, mesh, mat, instances.clone(), camera_bind_group);
+        }
     }
 
     pub fn texture_from_bytes(&self, bytes: &[u8], label: Option<&str>) -> anyhow::Result<Texture> {
@@ -455,13 +494,15 @@ impl GfxState {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.cam_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+            render_pass.set_pipeline(&self.render_pipeline);
+
+            self.draw_model_instanced(
+                &mut render_pass,
+                &self.obj_model,
+                0..self.instances.len() as u32,
+                &self.cam_bind_group,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

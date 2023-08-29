@@ -33,7 +33,10 @@ pub async fn load_to_bytes(filename: &str) -> anyhow::Result<Vec<u8>> {
                 .await?
                 .bytes().await?.to_vec();
         } else {
-            let path = std::path::Path::new(filename);
+            let path = std::path::Path::new(env!("OUT_DIR"))
+                .join("public")
+                .join(filename);
+
             let data = tokio::fs::read(path).await?;
         }
     }
@@ -48,7 +51,9 @@ pub async fn load_to_str(filename: &str) -> anyhow::Result<String> {
                 .await?
                 .bytes().await?.to_vec();
         } else {
-            let path = std::path::Path::new(filename);
+            let path = std::path::Path::new(env!("OUT_DIR"))
+                .join("public")
+                .join(filename);
             let data = tokio::fs::read_to_string(path).await?;
         }
     }
