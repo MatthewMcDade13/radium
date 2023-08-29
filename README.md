@@ -1,2 +1,5 @@
 # Radium
-2D Vulkan Rendering Library in Rust. Will be used in a GUI library later on.
+
+3D WGPU Rendering Library and soon to be Lite Game Engine.
+
+
