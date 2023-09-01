@@ -35,33 +35,6 @@ const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
     NUM_INSTANCES_PER_ROW as f32 * 0.5,
 );
 
-const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        tex_coords: [0.4131759, 0.00759614],
-        normal: [1., 1., 1.],
-    }, // A
-    Vertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        tex_coords: [0.0048659444, 0.43041354],
-        normal: [1., 1., 1.],
-    }, // B
-    Vertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        tex_coords: [0.28081453, 0.949397],
-        normal: [1., 1., 1.],
-    }, // C
-    Vertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        tex_coords: [0.85967, 0.84732914],
-        normal: [1., 1., 1.],
-    }, // D
-    Vertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        tex_coords: [0.9414737, 0.2652641],
-        normal: [1., 1., 1.],
-    }, // E
-];
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 pub struct GfxState {
     surface: wgpu::Surface,
@@ -72,11 +45,9 @@ pub struct GfxState {
     window: Window,
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
+
     num_indices: u32,
     index_buffer: wgpu::Buffer,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: Texture,
 
     camera: PlayerCamera,
     cam_buffer: wgpu::Buffer,
@@ -151,10 +122,6 @@ impl GfxState {
         };
         surface.configure(&device, &config);
 
-        let diffuse_bytes = include_bytes!("../public/rad_pepe.jpg");
-        let diffuse_texture =
-            Texture::from_bytes(&device, &queue, diffuse_bytes, Some("rad_pepe.jpg"))?;
-
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -175,24 +142,25 @@ impl GfxState {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
                 label: Some("texture_bind_group_layout"),
             });
-
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
 
         let camera = Camera {
             eye: (0., 1., 2.).into(),
@@ -214,7 +182,7 @@ impl GfxState {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -299,11 +267,6 @@ impl GfxState {
                 shader,
             )
         };
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
 
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
@@ -381,11 +344,8 @@ impl GfxState {
                 a: 1.,
             },
             render_pipeline,
-            vertex_buffer,
             num_indices,
             index_buffer,
-            diffuse_bind_group,
-            diffuse_texture,
             instances,
             instance_buffer,
             depth_texture,

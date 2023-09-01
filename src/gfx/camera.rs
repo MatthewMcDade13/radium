@@ -28,6 +28,7 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
@@ -35,20 +36,23 @@ impl Default for CameraUniform {
     fn default() -> Self {
         use cgmath::SquareMatrix;
         Self {
+            view_position: [0.0; 4],
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 }
 
 impl CameraUniform {
-    pub fn new(mat4: &[[f32; 4]; 4]) -> Self {
+    pub fn new(mat4: &[[f32; 4]; 4], view_pos: &[f32; 4]) -> Self {
         Self {
+            view_position: view_pos.clone(),
             view_proj: mat4.clone(),
         }
     }
 
     pub fn from_camera(cam: &Camera) -> Self {
         Self {
+            view_position: cam.eye.to_homogeneous().into(),
             view_proj: cam.build_view_proj_matrix().into(),
         }
     }

@@ -8,20 +8,23 @@ pub struct Instance {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct InstanceRaw([[f32; 4]; 4]);
+pub struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    normal: [[f32; 3]; 3],
+}
 
 impl Instance {
     pub fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw(
-            (cgmath::Matrix4::from_translation(self.position)
+        InstanceRaw {
+            model: (cgmath::Matrix4::from_translation(self.position)
                 * cgmath::Matrix4::from(self.rotation))
             .into(),
-        )
+            normal: cgmath::Matrix3::from(self.rotation).into(),
+        }
     }
 }
 impl InstanceRaw {
-    const ATTRIBS: [VertexAttribute; 4] =
-        wgpu::vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4];
+    const ATTRIBS: [VertexAttribute; 7] = wgpu::vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4, 9 => Float32x3, 10 => Float32x3, 11 => Float32x3];
     pub fn buffer_layout() -> wgpu::VertexBufferLayout<'static> {
         use std::mem;
 

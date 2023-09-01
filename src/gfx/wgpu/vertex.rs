@@ -5,17 +5,20 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub normal: [f32; 3],
+    pub tangent: [f32; 3],
+    pub bitangent: [f32; 3],
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3];
+    const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3, 3 => Float32x3, 4 => Float32x3];
 
     pub const fn zero() -> Vertex {
         Vertex {
             position: [0.; 3],
             tex_coords: [0.; 2],
             normal: [0.; 3],
+            tangent: [0.; 3],
+            bitangent: [0.; 3],
         }
     }
 

@@ -96,39 +96,36 @@ pub async fn load_model(
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let dt = m
-            .diffuse_texture
-            .as_ref()
-            .expect("Failed to find diffuse texture for object materail");
+        let diffuse_texture = {
+            let dt = m
+                .diffuse_texture
+                .as_ref()
+                .expect("Failed to find diffuse texture for object materail");
+            load_texture(dt, device, queue).await?
+        };
 
-        let diffuse_texture = load_texture(dt, device, queue).await?;
+        // TODO :: Probably want to make Normal textures optional? not sure yet.
+        let normal_texture = {
+            let nt = m
+                .normal_texture
+                .as_ref()
+                .expect("Failed to find normal texture for object material");
+            load_texture(nt, device, queue).await?
+        };
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: None,
-        });
-
-        materials.push(Material {
-            name: m.name,
+        materials.push(Material::new(
+            device,
             diffuse_texture,
-            bind_group,
-        })
+            normal_texture,
+            layout,
+            Some(&m.name),
+        ));
     }
 
     let meshes = models
         .into_iter()
         .map(|m| {
-            let verticies = (0..m.mesh.positions.len() / 3)
+            let mut verticies = (0..m.mesh.positions.len() / 3)
                 .map(|i| Vertex {
                     position: [
                         m.mesh.positions[i * 3],
@@ -141,8 +138,74 @@ pub async fn load_model(
                         m.mesh.normals[i * 3 + 1],
                         m.mesh.normals[i * 3 + 2],
                     ],
+                    ..Default::default()
                 })
                 .collect::<Vec<_>>();
+
+            let indicies = &m.mesh.indices;
+            let mut triangels_included = vec![0; verticies.len()];
+
+            // Calculate tangents and bitangents using Triangles.
+            // Loop through indicies in chunks of 3
+            for c in indicies.chunks(3) {
+                let v0 = verticies[c[0] as usize];
+                let v1 = verticies[c[1] as usize];
+                let v2 = verticies[c[2] as usize];
+
+                let pos0: cgmath::Vector3<_> = v0.position.into();
+                let pos1: cgmath::Vector3<_> = v1.position.into();
+                let pos2: cgmath::Vector3<_> = v2.position.into();
+
+                let uv0: cgmath::Vector2<_> = v0.tex_coords.into();
+                let uv1: cgmath::Vector2<_> = v1.tex_coords.into();
+                let uv2: cgmath::Vector2<_> = v2.tex_coords.into();
+
+                // Calc edges of triangle
+                let delta_pos1 = pos1 - pos0;
+                let delta_pos2 = pos2 - pos0;
+
+                // Gives us a direction to calc the tangent and bitangent
+                let delta_uv1 = uv1 - uv0;
+                let delta_uv2 = uv2 - uv0;
+
+                // System of Equations solves for tangent and bitangent
+                // delta_pos1 = delta_uv1.x * T + delta_u.y * B
+                // delta_pos2 = delta_uv2.x * T + delta_uv2.y * B
+                let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+                let tangent = (delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r;
+
+                // Flip bitangent to enable right-handed normal
+                // maps with wgpu texture coordinate system.
+                let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * -r;
+
+                // Use the same tangent and bitangent for each vertex in the triangle.
+                verticies[c[0] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(verticies[c[0] as usize].tangent)).into();
+                verticies[c[1] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(verticies[c[1] as usize].tangent)).into();
+                verticies[c[2] as usize].tangent =
+                    (tangent + cgmath::Vector3::from(verticies[c[2] as usize].tangent)).into();
+
+                verticies[c[0] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(verticies[c[0] as usize].bitangent)).into();
+                verticies[c[1] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(verticies[c[1] as usize].bitangent)).into();
+                verticies[c[2] as usize].bitangent =
+                    (bitangent + cgmath::Vector3::from(verticies[c[2] as usize].bitangent)).into();
+
+                // used to average the tangents and bitangents.
+                triangels_included[c[0] as usize] += 1;
+                triangels_included[c[1] as usize] += 1;
+                triangels_included[c[2] as usize] += 1;
+            }
+
+            // Average the tangents and bitangents.
+            for (i, n) in triangels_included.into_iter().enumerate() {
+                let denom = 1.0 / n as f32;
+                let v = &mut verticies[i];
+                v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
+                v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
+            }
 
             let vert_buff = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{:?} Vertex Buffer", filename)),
