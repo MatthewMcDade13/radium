@@ -6,7 +6,10 @@ use wgpu::util::DeviceExt;
 
 use crate::gfx::{
     model::{Material, Mesh, Model},
-    wgpu::{texture, vertex::Vertex},
+    wgpu::{
+        texture::{self, TextureType},
+        vertex::Vertex,
+    },
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -61,11 +64,12 @@ pub async fn load_to_str(filename: &str) -> anyhow::Result<String> {
 }
 pub async fn load_texture(
     filename: &str,
+    ty: TextureType,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<texture::Texture> {
     let data = load_to_bytes(filename).await?;
-    texture::Texture::from_bytes(device, queue, &data, Some(filename))
+    texture::Texture::from_bytes(device, queue, &data, ty, Some(filename))
 }
 
 pub async fn load_model(
@@ -101,7 +105,7 @@ pub async fn load_model(
                 .diffuse_texture
                 .as_ref()
                 .expect("Failed to find diffuse texture for object materail");
-            load_texture(dt, device, queue).await?
+            load_texture(dt, TextureType::Diffuse, device, queue).await?
         };
 
         // TODO :: Probably want to make Normal textures optional? not sure yet.
@@ -110,7 +114,7 @@ pub async fn load_model(
                 .normal_texture
                 .as_ref()
                 .expect("Failed to find normal texture for object material");
-            load_texture(nt, device, queue).await?
+            load_texture(nt, TextureType::Normal, device, queue).await?
         };
 
         materials.push(Material::new(

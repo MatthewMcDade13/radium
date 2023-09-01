@@ -1,7 +1,6 @@
 use actix::prelude::*;
 use anyhow::Result;
 use rad::run_loop;
-const TEMP: u32 = 0;
 
 mod eng;
 mod gfx;
