@@ -1,10 +1,17 @@
-use std::{ops::Range, time::Duration};
-const TEMP: u32 = 0;
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
+use actix::{Arbiter, SyncArbiter, System};
 use cgmath::prelude::*;
-use eng::hooks::{FrameUpdate, ProcessInput};
+use eng::{
+    hooks::{
+        AppSetup, DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput,
+        WindowEventHandler,
+    },
+    render::{light::draw_light_model, mesh::draw_model_instanced, DrawCtx, RenderWindow},
+    RadApp, Radium,
+};
 use gfx::{
-    camera::{Camera, CameraControl, CameraUniform, PlayerCamera, Projection},
+    camera::{Camera, CameraControl, CameraUniform, PanCamera, Projection},
     model::{Material, Mesh, Model},
     wgpu::{
         buffer::{Instance, InstanceRaw},
@@ -46,10 +53,7 @@ pub struct GfxState {
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
 
-    num_indices: u32,
-    index_buffer: wgpu::Buffer,
-
-    camera: PlayerCamera,
+    camera: PanCamera,
     projection: Projection,
     cam_buffer: wgpu::Buffer,
     cam_bind_group: wgpu::BindGroup,
@@ -198,7 +202,7 @@ impl GfxState {
             label: Some("camera_bind_group"),
         });
 
-        let player_cam = PlayerCamera {
+        let player_cam = PanCamera {
             cam: camera,
             uniform: cam_uniform,
             ctrl: CameraControl::new(4.0, 0.4),
@@ -341,8 +345,6 @@ impl GfxState {
                 a: 1.,
             },
             render_pipeline,
-            num_indices,
-            index_buffer,
             instances,
             instance_buffer,
             depth_texture,
@@ -375,173 +377,6 @@ impl GfxState {
 
         self.projection.resize(new_size.width, new_size.height);
     }
-    pub fn draw_light_mesh<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        self.draw_light_mesh_instanced(rp, mesh, 0..1, camera_bind_group, light_bind_group);
-    }
-
-    fn draw_light_mesh_instanced<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
-        rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
-        rp.set_bind_group(0, camera_bind_group, &[]);
-        rp.set_bind_group(1, light_bind_group, &[]);
-        rp.draw_indexed(0..mesh.num_elements, 0, instances);
-    }
-
-    fn draw_light_model<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        self.draw_light_model_instanced(rp, model, 0..1, camera_bind_group, light_bind_group);
-    }
-    fn draw_light_model_instanced<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        for mesh in &model.meshes {
-            self.draw_light_mesh_instanced(
-                rp,
-                mesh,
-                instances.clone(),
-                camera_bind_group,
-                light_bind_group,
-            );
-        }
-    }
-    pub fn draw_mesh<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        mat: &'b Material,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        self.draw_mesh_instanced(rp, mesh, mat, 0..1, camera_bind_group, light_bind_group);
-    }
-
-    pub fn draw_mesh_instanced<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        mat: &'b Material,
-        instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
-        rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
-        rp.set_bind_group(0, &mat.bind_group, &[]);
-        rp.set_bind_group(1, camera_bind_group, &[]);
-        rp.set_bind_group(2, light_bind_group, &[]);
-        rp.draw_indexed(0..mesh.num_elements, 0, instances);
-    }
-
-    pub fn draw_model<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        self.draw_model_instanced(rp, model, 0..1, camera_bind_group, light_bind_group);
-    }
-
-    pub fn draw_model_instanced<'a, 'b>(
-        &self,
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        for mesh in &model.meshes {
-            let mat = &model.materials[mesh.material];
-            self.draw_mesh_instanced(
-                rp,
-                mesh,
-                mat,
-                instances.clone(),
-                camera_bind_group,
-                light_bind_group,
-            );
-        }
-    }
-
-    pub fn texture_from_bytes(
-        &self,
-        ty: TextureType,
-        bytes: &[u8],
-        label: Option<&str>,
-    ) -> anyhow::Result<Texture> {
-        Texture::from_bytes(&self.device, &self.queue, bytes, ty, label)
-    }
-
-    pub fn create_depth_texture(&self, label: Option<&str>) -> Texture {
-        Texture::depth_texture(&self.device, &self.config, label)
-    }
-
-    /// return true if finished with polling inputs
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        virtual_keycode: Some(key),
-                        state,
-                        ..
-                    },
-                ..
-            } => self.camera.process_keyboard(*key, *state),
-            WindowEvent::MouseWheel { delta, .. } => {
-                self.camera.process_scroll(delta);
-                true
-            }
-            WindowEvent::MouseInput {
-                button: MouseButton::Left,
-                state,
-                ..
-            } => {
-                self.mouse_pressed = *state == ElementState::Pressed;
-                true
-            }
-            _ => false,
-        }
-    }
 
     pub fn update(&mut self, dt: Duration) {
         self.camera.frame_update(dt);
@@ -572,6 +407,47 @@ impl GfxState {
 
     pub fn set_clear_color(&mut self, color: wgpu::Color) {
         self.clear_color = color;
+    }
+
+    pub fn texture_from_bytes(
+        &self,
+        ty: TextureType,
+        bytes: &[u8],
+        label: Option<&str>,
+    ) -> anyhow::Result<Texture> {
+        Texture::from_bytes(&self.device, &self.queue, bytes, ty, label)
+    }
+
+    pub fn create_depth_texture(&self, label: Option<&str>) -> Texture {
+        Texture::depth_texture(&self.device, &self.config, label)
+    }
+
+    /// return true if finished with polling inputs
+    pub fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        virtual_keycode: Some(key),
+                        state,
+                        ..
+                    },
+                ..
+            } => self.camera.process_keyboard(*key, *state).into(),
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.camera.process_scroll(delta);
+                true
+            }
+            WindowEvent::MouseInput {
+                button: MouseButton::Left,
+                state,
+                ..
+            } => {
+                self.mouse_pressed = *state == ElementState::Pressed;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -608,14 +484,14 @@ impl GfxState {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
             render_pass.set_pipeline(&self.light_render_pipeline);
-            self.draw_light_model(
+            draw_light_model(
                 &mut render_pass,
                 &self.obj_model,
                 &self.cam_bind_group,
                 &self.light_bind_group,
             );
             render_pass.set_pipeline(&self.render_pipeline);
-            self.draw_model_instanced(
+            draw_model_instanced(
                 &mut render_pass,
                 &self.obj_model,
                 0..self.instances.len() as u32,
@@ -695,4 +571,92 @@ pub async fn run_loop() -> anyhow::Result<()> {
             _ => {}
         }
     });
+}
+
+struct Renderer {
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
+    obj_model: Model,
+    window: Rc<RefCell<RenderWindow>>,
+}
+
+impl Renderer {
+    pub async fn new(window: Rc<RefCell<RenderWindow>>) -> anyhow::Result<Self> {
+        const SPACE_BETWEEN: f32 = 3.0;
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
+
+                    let rotation = if position.is_zero() {
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
+
+                    Instance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let (instance_buffer, obj_model) = {
+            let window = window.borrow();
+            let device = window.device();
+            let queue = window.device_queue();
+            let texture_layout = window.texture_bind_group_layout();
+            let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+            let obj = load_model("cube.obj", &device, queue, texture_layout).await?;
+            (instance_buffer, obj)
+        };
+
+        Ok(Self {
+            instances,
+            instance_buffer,
+            obj_model,
+            window: window.clone(),
+        })
+    }
+}
+
+impl DrawFrame for Renderer {
+    fn draw_frame<'a>(&'a self, ctx: &DrawCtx<'a>) -> Result<(), wgpu::SurfaceError> {
+        let rw = ctx.window;
+
+        ctx.set_vertex_buffer(1, &self.instance_buffer);
+
+        rw.draw_light_model_instanced(&ctx, &self.obj_model, 0..self.instances.len() as u32);
+
+        rw.draw_model_instanced(&ctx, &self.obj_model, 0..self.instances.len() as u32);
+        Ok(())
+    }
+}
+struct App {
+    rw: RenderWindow,
+    renderer: Renderer,
+}
+impl FrameUpdate for Renderer {
+    fn frame_update(&mut self, dt: Duration) {
+        todo!()
+    }
+}
+impl WindowEventHandler for Renderer {}
+impl ProcessInput for Renderer {}
+impl RadApp for Renderer {}
+pub async fn _run_loop() -> anyhow::Result<()> {
+    env_logger::init();
+
+    Radium::start(|rw| Renderer::new(rw)).await;
+    Ok(())
 }

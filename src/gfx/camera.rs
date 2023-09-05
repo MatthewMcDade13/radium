@@ -7,7 +7,7 @@ use winit::{
 };
 
 use crate::{
-    eng::hooks::{FrameUpdate, ProcessInput, WindowEventHandler},
+    eng::hooks::{FrameUpdate, InputEventStatus, ProcessInput, WindowEventHandler},
     sys::math::{OPENGL_TO_WGPU_MATRIX, SAFE_FRAC_PI_2},
 };
 
@@ -103,15 +103,15 @@ impl CameraControl {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct PlayerCamera {
+pub struct PanCamera {
     pub cam: Camera,
     pub uniform: CameraUniform,
     pub ctrl: CameraControl,
 }
 
-impl PlayerCamera {}
+impl PanCamera {}
 
-impl FrameUpdate for PlayerCamera {
+impl FrameUpdate for PanCamera {
     fn frame_update(&mut self, dt: Duration) {
         let dt = dt.as_secs_f32();
 
@@ -151,8 +151,8 @@ impl FrameUpdate for PlayerCamera {
     }
 }
 
-impl ProcessInput for PlayerCamera {
-    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> bool {
+impl ProcessInput for PanCamera {
+    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
         let amount = if state == ElementState::Pressed {
             1.0
         } else {
@@ -161,29 +161,29 @@ impl ProcessInput for PlayerCamera {
         match key {
             VirtualKeyCode::W | VirtualKeyCode::Up => {
                 self.ctrl.units_forward = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::S | VirtualKeyCode::Down => {
                 self.ctrl.units_back = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::A | VirtualKeyCode::Left => {
                 self.ctrl.units_left = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::D | VirtualKeyCode::Right => {
                 self.ctrl.units_right = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::Space => {
                 self.ctrl.units_up = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::LControl => {
                 self.ctrl.units_down = amount;
-                true
+                InputEventStatus::Processing
             }
-            _ => false,
+            _ => InputEventStatus::Done,
         }
     }
 
