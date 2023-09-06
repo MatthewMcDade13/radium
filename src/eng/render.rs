@@ -1,7 +1,9 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     ops::Range,
     rc::Rc,
+    sync::Arc,
     time::Duration,
 };
 
@@ -16,6 +18,7 @@ use winit::{
 
 use crate::gfx::{
     camera::{Camera, CameraControl, CameraUniform, PanCamera, Projection},
+    draw::DrawCtx,
     light::LightUniform,
     model::{Material, Mesh, Model},
     wgpu::{
@@ -31,6 +34,7 @@ use self::{
 };
 
 use super::{
+    command::RenderCommand,
     hooks::{DrawFrame, FrameUpdate, InputEventStatus, MouseState},
     RadApp,
 };
@@ -48,7 +52,7 @@ pub struct RenderWindow {
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     clear_color: wgpu::Color,
-    pipeline: wgpu::RenderPipeline,
+    pipeline: Arc<wgpu::RenderPipeline>,
 
     camera: RenderCamera,
 
@@ -59,6 +63,7 @@ pub struct RenderWindow {
     event_loop: Option<Rc<EventLoop<()>>>,
     mouse_state: MouseState,
     texture_bind_group_layout: wgpu::BindGroupLayout,
+    command_queue: Vec<RenderCommand>,
 }
 
 impl RenderWindow {
@@ -74,12 +79,21 @@ impl RenderWindow {
     }
 
     #[inline]
+    pub fn pipeline(&self) -> Arc<wgpu::RenderPipeline> {
+        self.pipeline.clone()
+    }
+    #[inline]
+    pub fn light_render_pipeline(&self) -> Arc<wgpu::RenderPipeline> {
+        self.light_render.pipeline()
+    }
+
+    #[inline]
     pub fn depth_texture(&self) -> &Texture {
         &self.depth_texture
     }
 
     #[inline]
-    pub fn light_bind_group(&self) -> &wgpu::BindGroup {
+    pub fn light_bind_group(&self) -> Arc<wgpu::BindGroup> {
         self.light_render.bind_group()
     }
 
@@ -115,6 +129,16 @@ impl RenderWindow {
 
     pub const fn mouse_state(&self) -> MouseState {
         self.mouse_state
+    }
+
+    #[inline]
+    pub fn command_queue(&self) -> &Vec<RenderCommand> {
+        &self.command_queue
+    }
+
+    #[inline]
+    pub fn camera_bind_group(&self) -> Arc<wgpu::BindGroup> {
+        self.camera.bind_group()
     }
 
     pub async fn new() -> anyhow::Result<Self> {
@@ -241,7 +265,7 @@ impl RenderWindow {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
-                    camera.layout(),
+                    camera.layout().as_ref(),
                     // &light_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
@@ -264,21 +288,25 @@ impl RenderWindow {
 
         let depth_texture = Texture::depth_texture(&device, &config, "Depth Texture".into());
 
-        let light_render =
-            light::LightRenderer::new(&surface.device, surface.config.format, camera.layout());
+        let light_render = light::LightRenderer::new(
+            &surface.device,
+            surface.config.format,
+            camera.layout().as_ref(),
+        );
 
         let s = Self {
             surface,
             size,
             window,
             clear_color: wgpu::Color::BLACK,
-            pipeline: render_pipeline,
+            pipeline: Arc::new(render_pipeline),
             camera,
             depth_texture,
             light_render,
             event_loop: event_loop.into(),
             mouse_state: MouseState::Idle,
             texture_bind_group_layout,
+            command_queue: Vec::new(),
         };
         Ok(s)
     }
@@ -299,111 +327,139 @@ impl RenderWindow {
     // Result::Ok(s)
     // }
 
-    pub fn draw_light_model<'a>(&'a self, ctx: &DrawCtx<'_>, model: &'a Model) {
-        self.draw_light_model_instanced(ctx, model, 0..1);
+    pub fn draw_light_model(&mut self, model: &Model) {
+        self.draw_light_model_instanced(model, 0..1);
     }
-    pub fn draw_light_model_instanced<'a>(
-        &'a self,
-        ctx: &DrawCtx<'_>,
-        model: &'a Model,
-        instances: Range<u32>,
-    ) {
-        ctx.set_pipeline(self.light_render.pipeline());
-        ctx.draw_light_model_instanced(
+    pub fn draw_light_model_instanced(&mut self, model: &Model, instances: Range<u32>) {
+        self.command_queue
+            .push(RenderCommand::SetPipeline(self.light_render.pipeline()));
+
+        let cmds = draw_light_model_instanced(
             model,
+            instances,
             self.camera.bind_group(),
             self.light_render.bind_group(),
-            instances,
         );
+        self.command_queue.extend(cmds);
     }
-    pub fn draw_light_mesh<'a>(&'a self, mesh: &'a Mesh, rp: &'a mut RenderPass<'a>) {
-        self.draw_light_mesh_instanced(mesh, 0..1, rp);
+    pub fn draw_light_mesh(&mut self, mesh: &Mesh) {
+        self.draw_light_mesh_instanced(mesh, 0..1);
     }
-    pub fn draw_light_mesh_instanced<'a>(
-        &'a self,
-        mesh: &'a Mesh,
-        instances: Range<u32>,
-        rp: &'a mut RenderPass<'a>,
-    ) {
-        rp.set_pipeline(self.light_render.pipeline());
-        draw_light_mesh_instanced(
-            rp,
+    pub fn draw_light_mesh_instanced(&mut self, mesh: &Mesh, instances: Range<u32>) {
+        self.command_queue
+            .push(RenderCommand::SetPipeline(self.light_render.pipeline()));
+        let cmds = draw_light_mesh_instanced(
             mesh,
             instances,
             self.camera.bind_group(),
             self.light_render.bind_group(),
         );
+        self.command_queue.extend(cmds);
     }
-    pub fn draw_mesh<'a>(&'a self, mesh: &'a Mesh, mat: &'a Material, rp: &'a mut RenderPass<'a>) {
-        self.draw_mesh_instanced(mesh, mat, 0..1, rp);
+    pub fn draw_mesh(&mut self, mesh: &Mesh, mat: &Material) {
+        self.draw_mesh_instanced(mesh, mat, 0..1);
     }
-    pub fn draw_mesh_instanced<'a>(
-        &'a self,
-        mesh: &'a Mesh,
-        mat: &'a Material,
-        instances: Range<u32>,
-        rp: &'a mut RenderPass<'a>,
-    ) {
-        rp.set_pipeline(self.light_render.pipeline());
-        draw_mesh_instanced(
-            rp,
+    pub fn draw_mesh_instanced(&mut self, mesh: &Mesh, mat: &Material, instances: Range<u32>) {
+        self.command_queue
+            .push(RenderCommand::SetPipeline(self.pipeline.clone()));
+
+        let cmds = draw_mesh_instanced(
             mesh,
             mat,
             instances,
             self.camera.bind_group(),
             self.light_render.bind_group(),
         );
+        self.command_queue.extend(cmds);
     }
 
-    pub fn draw_model<'a>(&self, ctx: &DrawCtx<'_>, model: &'a Model) {
-        self.draw_model_instanced(ctx, model, 0..1);
+    pub fn draw_model(&mut self, model: &Model) {
+        self.draw_model_instanced(model, 0..1);
     }
-    pub fn draw_model_instanced<'a>(
-        &self,
-        ctx: &DrawCtx<'_>,
-        model: &'a Model,
-        instances: Range<u32>,
-    ) {
-        ctx.set_pipeline(self.light_render.pipeline());
+    pub fn draw_model_instanced(&mut self, model: &Model, instances: Range<u32>) {
+        self.command_queue
+            .push(RenderCommand::SetPipeline(self.pipeline.clone()));
 
-        ctx.draw_model_instanced(
+        let cmds = draw_model_instanced(
             model,
+            instances,
             self.camera.bind_group(),
             self.light_render.bind_group(),
-            instances,
-        )
+        );
+        self.command_queue.extend(cmds);
     }
 
-    pub fn draw_frame<D>(&self, drawer: &D) -> Result<(), wgpu::SurfaceError>
+    pub fn draw_frame<D>(&self, drawer: &mut D) -> Result<(), wgpu::SurfaceError>
     where
         D: DrawFrame,
     {
-        let encoder = self
-            .surface
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Command Encoder"),
-            });
-        let encoder = RefCell::new(encoder);
+        let mut encoder =
+            self.surface
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Command Encoder"),
+                });
 
         let frame = self.surface_texture()?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // window: &'a RenderWindow,
-        // frame: wgpu::SurfaceTexture,
-        // view: &'a TextureView,
-        // queue: &'a wgpu::Queue,
-        // encoder: &'a mut wgpu::CommandEncoder,
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            });
 
-        let draw_ctx = DrawCtx::begin(&self, frame, &view, &self.surface.queue, encoder);
+            let mut ctx = DrawCtx::from_window(self);
+            drawer.draw_frame(&mut ctx)?;
+            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-        drawer.draw_frame(&draw_ctx);
+            // render_pass.set_pipeline(&self.light_render_pipeline);
+            // draw_light_model(
+            // &self.obj_model,
+            // &self.cam_bind_group,
+            // &self.light_bind_group,
+            // );
+            // render_pass.set_pipeline(&self.render_pipeline);const
+            // draw_model_instanced(
+            // &self.obj_model,
+            // 0..self.instances.len() as u32,
+            // &self.cam_bind_group,
+            // &self.light_bind_group, // NEW
+            // );
+        }
 
-        draw_ctx.submit(encoder.into_inner());
+        self.surface.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
         std::result::Result::Ok(())
     }
+
+    // window: &'a RenderWindow,
+    // frame: wgpu::SurfaceTexture,
+    // view: &'a TextureView,
+    // queue: &'a wgpu::Queue,
+    // encoder: &'a mut wgpu::CommandEncoder,
+
+    // drawer.draw_frame(&draw_ctx);
+
+    // draw_ctx.submit(encoder.into_inner());
+    // std::result::Result::Ok(())
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
@@ -428,9 +484,9 @@ impl RenderWindow {
 
 pub struct RenderCamera {
     cam: PanCamera,
-    buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    layout: wgpu::BindGroupLayout,
+    buffer: Arc<wgpu::Buffer>,
+    bind_group: Arc<wgpu::BindGroup>,
+    layout: Arc<wgpu::BindGroupLayout>,
     projection: Projection,
 }
 
@@ -483,26 +539,30 @@ impl RenderCamera {
             ctrl: CameraControl::new(4.0, 0.4),
         };
 
+        let buffer = Arc::new(cam_buffer);
+        let bind_group = Arc::new(cam_bind_group);
+        let layout = Arc::new(cam_bind_group_layout);
+
         Self {
             cam: pan_cam,
-            buffer: cam_buffer,
-            bind_group: cam_bind_group,
-            layout: cam_bind_group_layout,
+            buffer,
+            bind_group,
+            layout,
             projection,
         }
     }
 
-    pub const fn layout(&self) -> &wgpu::BindGroupLayout {
-        &self.layout
+    pub fn layout(&self) -> Arc<wgpu::BindGroupLayout> {
+        self.layout.clone()
     }
 
-    pub const fn buffer(&self) -> &wgpu::Buffer {
-        &self.buffer
+    pub fn buffer(&self) -> Arc<wgpu::Buffer> {
+        self.buffer.clone()
     }
-    pub const fn bind_group(&self) -> &wgpu::BindGroup {
-        &self.bind_group
+    pub fn bind_group(&self) -> Arc<wgpu::BindGroup> {
+        self.bind_group.clone()
     }
-    pub const fn projection(&self) -> &Projection {
+    pub fn projection(&self) -> &Projection {
         &self.projection
     }
     pub fn projection_mut(&mut self) -> &mut Projection {
@@ -511,27 +571,30 @@ impl RenderCamera {
 }
 
 pub mod light {
-    use std::ops::Range;
+    use std::{ops::Range, sync::Arc};
 
     use wgpu::{util::DeviceExt, Device, RenderPass};
 
-    use crate::gfx::{
-        light::LightUniform,
-        model::{Mesh, Model},
-        wgpu::{buffer::create_render_pipeline, texture::Texture, vertex::Vertex},
+    use crate::{
+        eng::command::RenderCommand,
+        gfx::{
+            light::LightUniform,
+            model::{Mesh, Model},
+            wgpu::{buffer::create_render_pipeline, texture::Texture, vertex::Vertex},
+        },
     };
 
     pub struct LightRenderer {
-        render_pipeline: wgpu::RenderPipeline,
+        render_pipeline: Arc<wgpu::RenderPipeline>,
         uniform: LightUniform,
-        buffer: wgpu::Buffer,
-        bind_group: wgpu::BindGroup,
-        layout: wgpu::BindGroupLayout,
+        buffer: Arc<wgpu::Buffer>,
+        bind_group: Arc<wgpu::BindGroup>,
+        layout: Arc<wgpu::BindGroupLayout>,
     }
 
     impl LightRenderer {
-        pub const fn bind_group(&self) -> &wgpu::BindGroup {
-            &self.bind_group
+        pub fn bind_group(&self) -> Arc<wgpu::BindGroup> {
+            self.bind_group.clone()
         }
         pub fn new(
             device: &Device,
@@ -592,6 +655,11 @@ pub mod light {
                 )
             };
 
+            let render_pipeline = Arc::new(render_pipeline);
+            let buffer = Arc::new(buffer);
+            let bind_group = Arc::new(bind_group);
+            let layout = Arc::new(layout);
+
             Self {
                 render_pipeline,
                 uniform,
@@ -600,269 +668,137 @@ pub mod light {
                 layout,
             }
         }
-        pub const fn pipeline(&self) -> &wgpu::RenderPipeline {
-            &self.render_pipeline
+        pub fn pipeline(&self) -> Arc<wgpu::RenderPipeline> {
+            self.render_pipeline.clone()
         }
     }
 
-    pub fn draw_light_mesh<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        draw_light_mesh_instanced(rp, mesh, 0..1, camera_bind_group, light_bind_group);
+    pub fn draw_light_mesh(
+        mesh: &Mesh,
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        draw_light_mesh_instanced(mesh, 0..1, camera_bind_group, light_bind_group)
     }
 
-    pub fn draw_light_mesh_instanced<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
+    pub fn draw_light_mesh_instanced(
+        mesh: &Mesh,
         instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
-        rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
-        rp.set_bind_group(0, camera_bind_group, &[]);
-        rp.set_bind_group(1, light_bind_group, &[]);
-        rp.draw_indexed(0..mesh.num_elements, 0, instances);
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        vec![
+            RenderCommand::SetVertexBuffer(0, mesh.vert_buff.clone()),
+            RenderCommand::SetIndexBuffer(mesh.index_buff.clone(), wgpu::IndexFormat::Uint32),
+            RenderCommand::SetBindGroup(0, camera_bind_group.clone(), None),
+            RenderCommand::SetBindGroup(1, light_bind_group.clone(), None),
+            RenderCommand::DrawIndexed(0..mesh.num_elements, 0, instances),
+        ]
     }
 
-    pub fn draw_light_model<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        draw_light_model_instanced(rp, model, 0..1, camera_bind_group, light_bind_group);
+    pub fn draw_light_model(
+        model: &Model,
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        draw_light_model_instanced(
+            model,
+            0..1,
+            camera_bind_group.clone(),
+            light_bind_group.clone(),
+        )
     }
 
-    pub fn draw_light_model_instanced<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
+    pub fn draw_light_model_instanced(
+        model: &Model,
         instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        let mut buffer = Vec::new();
         for mesh in &model.meshes {
-            draw_light_mesh_instanced(
-                rp,
+            let cmds = draw_light_mesh_instanced(
                 mesh,
                 instances.clone(),
-                camera_bind_group,
-                light_bind_group,
+                camera_bind_group.clone(),
+                light_bind_group.clone(),
             );
+            buffer.extend(cmds);
         }
+        buffer
     }
 }
 
 pub mod mesh {
-    use std::ops::Range;
+    use std::{ops::Range, sync::Arc};
 
     use wgpu::RenderPass;
 
-    use crate::gfx::model::{Material, Mesh, Model};
+    use crate::{
+        eng::command::RenderCommand,
+        gfx::model::{Material, Mesh, Model},
+    };
 
-    pub fn draw_mesh<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        mat: &'b Material,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        draw_mesh_instanced(rp, mesh, mat, 0..1, camera_bind_group, light_bind_group);
+    pub fn draw_mesh(
+        mesh: &Mesh,
+        mat: &Material,
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        draw_mesh_instanced(
+            mesh,
+            mat,
+            0..1,
+            camera_bind_group.clone(),
+            light_bind_group.clone(),
+        )
     }
 
-    pub fn draw_mesh_instanced<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        mesh: &'b Mesh,
-        mat: &'b Material,
+    pub fn draw_mesh_instanced(
+        mesh: &Mesh,
+        mat: &Material,
         instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
-        rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
-        rp.set_bind_group(0, &mat.bind_group, &[]);
-        rp.set_bind_group(1, camera_bind_group, &[]);
-        rp.set_bind_group(2, light_bind_group, &[]);
-        rp.draw_indexed(0..mesh.num_elements, 0, instances);
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        vec![
+            RenderCommand::SetVertexBuffer(0, mesh.vert_buff.clone()),
+            RenderCommand::SetIndexBuffer(mesh.index_buff.clone(), wgpu::IndexFormat::Uint32),
+            RenderCommand::SetBindGroup(0, mat.bind_group.clone(), None),
+            RenderCommand::SetBindGroup(1, camera_bind_group.clone(), None),
+            RenderCommand::SetBindGroup(2, light_bind_group.clone(), None),
+            RenderCommand::DrawIndexed(0..mesh.num_elements, 0, instances),
+        ]
     }
 
-    pub fn draw_model<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        draw_model_instanced(rp, model, 0..1, camera_bind_group, light_bind_group);
-    }
-
-    pub fn draw_model_instanced<'a, 'b>(
-        rp: &mut RenderPass<'a>,
-        model: &'b Model,
-        instances: Range<u32>,
-        camera_bind_group: &'b wgpu::BindGroup,
-        light_bind_group: &'b wgpu::BindGroup,
-    ) where
-        'b: 'a,
-    {
-        for mesh in &model.meshes {
-            let mat = &model.materials[mesh.material];
-            draw_mesh_instanced(
-                rp,
-                mesh,
-                mat,
-                instances.clone(),
-                camera_bind_group,
-                light_bind_group,
-            );
-        }
-    }
-}
-pub type RenderWindowMut = Rc<RefCell<RenderWindow>>;
-
-pub struct EncoderCtx<'a> {
-    encoder: &'a mut wgpu::CommandEncoder,
-    view: Rc<wgpu::TextureView>,
-}
-pub struct DrawCtx<'a> {
-    pub window: &'a RenderWindow,
-
-    pub render_pass: RefCell<RenderPass<'a>>,
-    view: &'a wgpu::TextureView,
-    queue: &'a wgpu::Queue,
-
-    surface: wgpu::SurfaceTexture,
-    encoder: RefCell<wgpu::CommandEncoder>,
-}
-impl<'a> DrawCtx<'a> {
-    pub fn begin(
-        window: &'a RenderWindow,
-        frame: wgpu::SurfaceTexture,
-        view: &'a TextureView,
-        queue: &'a wgpu::Queue,
-        encoder: RefCell<wgpu::CommandEncoder>,
-    ) -> Self {
-        let render_pass = encoder
-            .borrow_mut()
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &window.depth_texture().view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: true,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-
-        let ctx = DrawCtx {
-            window,
-            render_pass: RefCell::new(render_pass),
-            view,
-            queue,
-            surface: frame,
-            encoder,
-        };
-        ctx
-    }
-
-    pub fn submit(self, encoder: wgpu::CommandEncoder) {
-        self.queue.submit(std::iter::once(encoder.finish()));
-        self.surface.present();
-    }
-
-    pub fn set_vertex_buffer(&self, slot: u32, buffer: &wgpu::Buffer) {
-        self.render_pass
-            .get_mut()
-            .set_vertex_buffer(slot, buffer.slice(..));
-    }
-
-    // rp.set_vertex_buffer(0, mesh.vert_buff.slice(..));
-    // rp.set_index_buffer(mesh.index_buff.slice(..), wgpu::IndexFormat::Uint32);
-    // rp.set_bind_group(0, camera_bind_group, &[]);
-    // rp.set_bind_group(1, light_bind_group, &[]);
-    // rp.draw_indexed(0..mesh.num_elements, 0, instances);
-    pub fn set_index_buffer(&self, buffer: &wgpu::Buffer, index_format: wgpu::IndexFormat) {
-        self.render_pass
-            .get_mut()
-            .set_index_buffer(buffer.slice(..), index_format);
-    }
-
-    pub fn set_bind_group(
-        &self,
-        index: u32,
-        bind_group: &wgpu::BindGroup,
-        offsets: &[DynamicOffset],
-    ) {
-        self.render_pass
-            .get_mut()
-            .set_bind_group(index, bind_group, offsets);
-    }
-
-    pub fn draw_indexed(&self, indices: Range<u32>, base_vert: u32, instances: Range<u32>) {
-        self.render_pass
-            .get_mut()
-            .draw_indexed(indices, base_vert as i32, instances);
-    }
-
-    pub fn set_pipeline(&self, pipeline: &wgpu::RenderPipeline) {
-        self.render_pass.get_mut().set_pipeline(pipeline);
+    pub fn draw_model(
+        model: &Model,
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        draw_model_instanced(model, 0..1, camera_bind_group, light_bind_group)
     }
 
     pub fn draw_model_instanced(
-        &self,
         model: &Model,
-        camera_bind_group: &wgpu::BindGroup,
-        light_bind_group: &wgpu::BindGroup,
         instances: Range<u32>,
-    ) {
-        draw_model_instanced(
-            self.render_pass.get_mut(),
-            model,
-            instances,
-            camera_bind_group,
-            light_bind_group,
-        );
-    }
+        camera_bind_group: Arc<wgpu::BindGroup>,
+        light_bind_group: Arc<wgpu::BindGroup>,
+    ) -> Vec<RenderCommand> {
+        let mut buffer = Vec::new();
+        for mesh in &model.meshes {
+            let mat = &model.materials[mesh.material];
 
-    pub fn draw_light_model_instanced(
-        &self,
-        model: &Model,
-        camera_bind_group: &wgpu::BindGroup,
-        light_bind_group: &wgpu::BindGroup,
-        instances: Range<u32>,
-    ) {
-        draw_light_model_instanced(
-            self.render_pass.get_mut(),
-            model,
-            instances,
-            camera_bind_group,
-            light_bind_group,
-        )
+            let cmds = draw_mesh_instanced(
+                mesh,
+                mat,
+                instances.clone(),
+                camera_bind_group.clone(),
+                light_bind_group.clone(),
+            );
+            buffer.extend(cmds);
+        }
+        buffer
     }
 }
+pub type RenderWindowMut = Rc<RefCell<RenderWindow>>;

@@ -8,11 +8,10 @@ use std::{
 use wgpu::{Device, DynamicOffset, RenderPass};
 use winit::event::{ElementState, MouseScrollDelta, VirtualKeyCode, WindowEvent};
 
-use crate::gfx::model::Model;
+use crate::gfx::{self, draw::DrawCtx, model::Model};
 
 use super::render::{
-    light::draw_light_model_instanced, mesh::draw_model_instanced, DrawCtx, RenderWindow,
-    RenderWindowMut,
+    light::draw_light_model_instanced, mesh::draw_model_instanced, RenderWindow, RenderWindowMut,
 };
 
 // pub trait RadApp: FrameUpdate + DrawFrame + WindowEventHandler + ProcessInput {}
@@ -37,7 +36,7 @@ pub trait WindowEventHandler {
 }
 
 pub trait DrawFrame {
-    fn draw_frame<'a>(&'a self, ctx: &DrawCtx<'a>) -> Result<(), wgpu::SurfaceError>;
+    fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError>;
 }
 
 pub trait FrameUpdate {

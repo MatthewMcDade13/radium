@@ -1,4 +1,7 @@
-use std::io::{BufReader, Cursor};
+use std::{
+    io::{BufReader, Cursor},
+    sync::Arc,
+};
 const TEMP: u32 = 0;
 
 use cfg_if::cfg_if;
@@ -221,6 +224,8 @@ pub async fn load_model(
                 contents: bytemuck::cast_slice(&m.mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
+            let vert_buff = Arc::new(vert_buff);
+            let index_buff = Arc::new(index_buff);
             Mesh {
                 name: filename.to_string(),
                 vert_buff,

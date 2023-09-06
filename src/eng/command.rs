@@ -1,7 +1,8 @@
 use std::{collections::VecDeque, ops::Range, sync::Arc};
 
-use wgpu::{BufferAddress, DynamicOffset, IndexFormat};
+use wgpu::{BufferAddress, DynamicOffset, IndexFormat, RenderPass};
 
+#[derive(Debug, Clone)]
 pub enum RenderCommand {
     SetPipeline(Arc<wgpu::RenderPipeline>),
     ///
@@ -11,7 +12,7 @@ pub enum RenderCommand {
     ///    bind_group: &'a BindGroup,
     ///    offsets: &[DynamicOffset],
     /// );
-    SetBindGroup(u32, wgpu::BindGroup, Vec<DynamicOffset>),
+    SetBindGroup(u32, Arc<wgpu::BindGroup>, Option<Vec<DynamicOffset>>),
     /// pub fn set_blend_constant(_, color: Color)
     SetBlendConstant(wgpu::Color),
     /// pub fn set_index_buffer(&mut self, buffer_slice: BufferSlice<'a>, index_format: IndexFormat)
@@ -52,23 +53,47 @@ pub enum RenderCommand {
     ExecuteBundles(),
 }
 
-pub struct CommandQueue {
-    render: VecDeque<RenderCommand>,
-}
-
-impl CommandQueue {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_cmd(&mut self, cmd: RenderCommand) {
-        self.render.push_back(cmd);
-    }
-}
-impl Default for CommandQueue {
-    fn default() -> Self {
-        Self {
-            render: VecDeque::new(),
+pub fn process_draw_queue<'a>(rp: &'a mut RenderPass<'a>, queue: &'a Vec<RenderCommand>) {
+    for cmd in queue.iter() {
+        match cmd {
+            RenderCommand::SetPipeline(pipeline) => rp.set_pipeline(&pipeline),
+            RenderCommand::SetBindGroup(slot, bind_group, offsets) => {
+                let offsets = match offsets {
+                    Some(os) => os.as_slice(),
+                    None => &[],
+                };
+                rp.set_bind_group(*slot, bind_group.as_ref(), offsets);
+            }
+            RenderCommand::SetBlendConstant(color) => rp.set_blend_constant(*color),
+            RenderCommand::SetIndexBuffer(buffer, index_format) => {
+                rp.set_index_buffer(buffer.slice(..), *index_format)
+            }
+            RenderCommand::SetVertexBuffer(slot, buffer) => {
+                rp.set_vertex_buffer(*slot, buffer.slice(..))
+            }
+            RenderCommand::SetScissorRect(x, y, width, height) => {
+                rp.set_scissor_rect(*x, *y, *width, *height)
+            }
+            RenderCommand::SetViewPort(x, y, w, h, min_depth, max_depth) => {
+                rp.set_viewport(*x, *y, *w, *h, *min_depth, *max_depth)
+            }
+            RenderCommand::SetStencilReference(reference) => rp.set_stencil_reference(*reference),
+            RenderCommand::Draw(vertices, instances) => {
+                rp.draw(vertices.clone(), instances.clone())
+            }
+            RenderCommand::InsertDebugMarker(label) => rp.insert_debug_marker(label),
+            RenderCommand::PushDebugGroup(label) => rp.push_debug_group(label),
+            RenderCommand::PopDebugGroup => rp.pop_debug_group(),
+            RenderCommand::DrawIndexed(indices, base_vertex, instances) => {
+                rp.draw_indexed(indices.clone(), *base_vertex, instances.clone())
+            }
+            RenderCommand::DrawIndirect(indirect_buffer, indirect_offset) => {
+                rp.draw_indirect(indirect_buffer, *indirect_offset)
+            }
+            RenderCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset) => {
+                rp.draw_indexed_indirect(indirect_buffer, *indirect_offset)
+            }
+            RenderCommand::ExecuteBundles() => todo!(),
         }
     }
 }

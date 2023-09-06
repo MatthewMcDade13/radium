@@ -7,11 +7,12 @@ use eng::{
         AppSetup, DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput,
         WindowEventHandler,
     },
-    render::{light::draw_light_model, mesh::draw_model_instanced, DrawCtx, RenderWindow},
+    render::{light::draw_light_model, mesh::draw_model_instanced, RenderWindow},
     RadApp, Radium,
 };
 use gfx::{
     camera::{Camera, CameraControl, CameraUniform, PanCamera, Projection},
+    draw::DrawCtx,
     model::{Material, Mesh, Model},
     wgpu::{
         buffer::{Instance, InstanceRaw},
@@ -481,23 +482,21 @@ impl GfxState {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            draw_light_model(
-                &mut render_pass,
-                &self.obj_model,
-                &self.cam_bind_group,
-                &self.light_bind_group,
-            );
-            render_pass.set_pipeline(&self.render_pipeline);
-            draw_model_instanced(
-                &mut render_pass,
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.cam_bind_group,
-                &self.light_bind_group, // NEW
-            );
+            // render_pass.set_pipeline(&self.light_render_pipeline);
+            // draw_light_model(
+            // &self.obj_model,
+            // &self.cam_bind_group,
+            // &self.light_bind_group,
+            // );
+            // render_pass.set_pipeline(&self.render_pipeline);
+            // draw_model_instanced(
+            // &self.obj_model,
+            // 0..self.instances.len() as u32,
+            // &self.cam_bind_group,
+            // &self.light_bind_group, // NEW
+            // );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -629,9 +628,10 @@ impl Renderer {
         })
     }
 }
-
+/*
+*
 impl DrawFrame for Renderer {
-    fn draw_frame<'a>(&'a self, ctx: &DrawCtx<'a>) -> Result<(), wgpu::SurfaceError> {
+    fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError> {
         let rw = ctx.window;
 
         ctx.set_vertex_buffer(1, &self.instance_buffer);
@@ -642,6 +642,8 @@ impl DrawFrame for Renderer {
         Ok(())
     }
 }
+
+
 struct App {
     rw: RenderWindow,
     renderer: Renderer,
@@ -660,3 +662,4 @@ pub async fn _run_loop() -> anyhow::Result<()> {
     Radium::start(|rw| Renderer::new(rw)).await;
     Ok(())
 }
+*/
