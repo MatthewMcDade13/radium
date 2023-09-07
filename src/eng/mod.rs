@@ -39,7 +39,7 @@ impl Radium {
 
         let mut last_dt = std::time::Instant::now();
 
-        let mut app = Cell::new(factory(render_window.clone()).await?);
+        let mut app = factory(render_window.clone()).await?;
 
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
@@ -49,7 +49,6 @@ impl Radium {
                     ref event,
                     window_id,
                 } if window_id == render_window.borrow().window_id() => {
-                    let app = app.get_mut();
                     match app.handle_window_events(event) {
                         InputEventStatus::Processing => {}
                         InputEventStatus::Done => match event {
@@ -82,9 +81,18 @@ impl Radium {
                     let dt = now - last_dt;
                     last_dt = now;
 
-                    app.get_mut().frame_update(dt);
+                    app.frame_update(dt);
 
-                    if let Err(error) = render_window.borrow().draw_frame(app.get_mut()) {
+                    let mut ctx = render_window.borrow().create_draw_context();
+
+                    app.draw_frame(&mut ctx)
+                        .expect("Error occured while drawing frame");
+
+                    render_window
+                        .borrow_mut()
+                        .submit_frame()
+                        .expect("Error occured while submitting draw queue to frame");
+                    if let Err(error) = render_window.borrow_mut().submit_frame() {
                         match error {
                             wgpu::SurfaceError::Lost => render_window
                                 .borrow_mut()
@@ -101,7 +109,7 @@ impl Radium {
                     event: DeviceEvent::MouseMotion { delta },
                     ..
                 } => match render_window.borrow().mouse_state() {
-                    MouseState::Pressed => app.get_mut().process_mouse(delta.0, delta.1),
+                    MouseState::Pressed => app.process_mouse(delta.0, delta.1),
                     _ => {}
                 },
                 _ => {}

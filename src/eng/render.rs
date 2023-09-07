@@ -34,7 +34,7 @@ use self::{
 };
 
 use super::{
-    command::RenderCommand,
+    command::{process_draw_queue, RenderCommand},
     hooks::{DrawFrame, FrameUpdate, InputEventStatus, MouseState},
     RadApp,
 };
@@ -326,6 +326,100 @@ impl RenderWindow {
     // )?;
     // Result::Ok(s)
     // }
+    //
+    pub fn create_draw_context(&self) -> DrawCtx {
+        DrawCtx::from_window(self)
+    }
+
+    pub fn submit_draw_ctx(&mut self, ctx: &DrawCtx) -> Result<(), wgpu::SurfaceError> {
+        self.command_queue.extend(ctx.command_queue().clone());
+        self.submit_frame()
+    }
+    pub fn submit_frame(&mut self) -> Result<(), wgpu::SurfaceError> {
+        let mut encoder =
+            self.surface
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Command Encoder"),
+                });
+
+        let frame = self.surface_texture()?;
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
+            });
+
+            for cmd in self.command_queue.iter() {
+                match cmd {
+                    RenderCommand::SetPipeline(pipeline) => rp.set_pipeline(&pipeline),
+                    RenderCommand::SetBindGroup(slot, bind_group, offsets) => {
+                        let offsets = match offsets {
+                            Some(os) => os.as_slice(),
+                            None => &[],
+                        };
+                        rp.set_bind_group(*slot, bind_group.as_ref(), offsets);
+                    }
+                    RenderCommand::SetBlendConstant(color) => rp.set_blend_constant(*color),
+                    RenderCommand::SetIndexBuffer(buffer, index_format) => {
+                        rp.set_index_buffer(buffer.slice(..), *index_format)
+                    }
+                    RenderCommand::SetVertexBuffer(slot, buffer) => {
+                        rp.set_vertex_buffer(*slot, buffer.slice(..))
+                    }
+                    RenderCommand::SetScissorRect(x, y, width, height) => {
+                        rp.set_scissor_rect(*x, *y, *width, *height)
+                    }
+                    RenderCommand::SetViewPort(x, y, w, h, min_depth, max_depth) => {
+                        rp.set_viewport(*x, *y, *w, *h, *min_depth, *max_depth)
+                    }
+                    RenderCommand::SetStencilReference(reference) => {
+                        rp.set_stencil_reference(*reference)
+                    }
+                    RenderCommand::Draw(vertices, instances) => {
+                        rp.draw(vertices.clone(), instances.clone())
+                    }
+                    RenderCommand::InsertDebugMarker(label) => rp.insert_debug_marker(label),
+                    RenderCommand::PushDebugGroup(label) => rp.push_debug_group(label),
+                    RenderCommand::PopDebugGroup => rp.pop_debug_group(),
+                    RenderCommand::DrawIndexed(indices, base_vertex, instances) => {
+                        rp.draw_indexed(indices.clone(), *base_vertex, instances.clone())
+                    }
+                    RenderCommand::DrawIndirect(indirect_buffer, indirect_offset) => {
+                        rp.draw_indirect(indirect_buffer, *indirect_offset)
+                    }
+                    RenderCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset) => {
+                        rp.draw_indexed_indirect(indirect_buffer, *indirect_offset)
+                    }
+                    RenderCommand::ExecuteBundles() => todo!(),
+                }
+            }
+        }
+
+        self.surface.queue.submit(std::iter::once(encoder.finish()));
+        self.command_queue.clear();
+        frame.present();
+        std::result::Result::Ok(())
+    }
 
     pub fn draw_light_model(&mut self, model: &Model) {
         self.draw_light_model_instanced(model, 0..1);
@@ -387,67 +481,6 @@ impl RenderWindow {
             self.light_render.bind_group(),
         );
         self.command_queue.extend(cmds);
-    }
-
-    pub fn draw_frame<D>(&self, drawer: &mut D) -> Result<(), wgpu::SurfaceError>
-    where
-        D: DrawFrame,
-    {
-        let mut encoder =
-            self.surface
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Command Encoder"),
-                });
-
-        let frame = self.surface_texture()?;
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: true,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-
-            let mut ctx = DrawCtx::from_window(self);
-            drawer.draw_frame(&mut ctx)?;
-            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-
-            // render_pass.set_pipeline(&self.light_render_pipeline);
-            // draw_light_model(
-            // &self.obj_model,
-            // &self.cam_bind_group,
-            // &self.light_bind_group,
-            // );
-            // render_pass.set_pipeline(&self.render_pipeline);const
-            // draw_model_instanced(
-            // &self.obj_model,
-            // 0..self.instances.len() as u32,
-            // &self.cam_bind_group,
-            // &self.light_bind_group, // NEW
-            // );
-        }
-
-        self.surface.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
-        std::result::Result::Ok(())
     }
 
     // window: &'a RenderWindow,

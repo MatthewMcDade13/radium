@@ -53,47 +53,4 @@ pub enum RenderCommand {
     ExecuteBundles(),
 }
 
-pub fn process_draw_queue<'a>(rp: &'a mut RenderPass<'a>, queue: &'a Vec<RenderCommand>) {
-    for cmd in queue.iter() {
-        match cmd {
-            RenderCommand::SetPipeline(pipeline) => rp.set_pipeline(&pipeline),
-            RenderCommand::SetBindGroup(slot, bind_group, offsets) => {
-                let offsets = match offsets {
-                    Some(os) => os.as_slice(),
-                    None => &[],
-                };
-                rp.set_bind_group(*slot, bind_group.as_ref(), offsets);
-            }
-            RenderCommand::SetBlendConstant(color) => rp.set_blend_constant(*color),
-            RenderCommand::SetIndexBuffer(buffer, index_format) => {
-                rp.set_index_buffer(buffer.slice(..), *index_format)
-            }
-            RenderCommand::SetVertexBuffer(slot, buffer) => {
-                rp.set_vertex_buffer(*slot, buffer.slice(..))
-            }
-            RenderCommand::SetScissorRect(x, y, width, height) => {
-                rp.set_scissor_rect(*x, *y, *width, *height)
-            }
-            RenderCommand::SetViewPort(x, y, w, h, min_depth, max_depth) => {
-                rp.set_viewport(*x, *y, *w, *h, *min_depth, *max_depth)
-            }
-            RenderCommand::SetStencilReference(reference) => rp.set_stencil_reference(*reference),
-            RenderCommand::Draw(vertices, instances) => {
-                rp.draw(vertices.clone(), instances.clone())
-            }
-            RenderCommand::InsertDebugMarker(label) => rp.insert_debug_marker(label),
-            RenderCommand::PushDebugGroup(label) => rp.push_debug_group(label),
-            RenderCommand::PopDebugGroup => rp.pop_debug_group(),
-            RenderCommand::DrawIndexed(indices, base_vertex, instances) => {
-                rp.draw_indexed(indices.clone(), *base_vertex, instances.clone())
-            }
-            RenderCommand::DrawIndirect(indirect_buffer, indirect_offset) => {
-                rp.draw_indirect(indirect_buffer, *indirect_offset)
-            }
-            RenderCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset) => {
-                rp.draw_indexed_indirect(indirect_buffer, *indirect_offset)
-            }
-            RenderCommand::ExecuteBundles() => todo!(),
-        }
-    }
-}
+pub fn process_draw_queue<'a, 'b: 'a>(rp: &'a mut RenderPass<'a>, queue: &'b [RenderCommand]) {}

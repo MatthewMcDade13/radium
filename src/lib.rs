@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
+use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc, time::Duration};
 
 use actix::{Arbiter, SyncArbiter, System};
 use cgmath::prelude::*;
@@ -574,9 +574,8 @@ pub async fn run_loop() -> anyhow::Result<()> {
 
 struct Renderer {
     instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
+    instance_buffer: Arc<wgpu::Buffer>,
     obj_model: Model,
-    window: Rc<RefCell<RenderWindow>>,
 }
 
 impl Renderer {
@@ -620,29 +619,26 @@ impl Renderer {
             (instance_buffer, obj)
         };
 
+        let instance_buffer = Arc::new(instance_buffer);
+
         Ok(Self {
             instances,
             instance_buffer,
             obj_model,
-            window: window.clone(),
         })
     }
 }
-/*
-*
+
 impl DrawFrame for Renderer {
     fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError> {
-        let rw = ctx.window;
+        ctx.set_vertex_buffer(1, self.instance_buffer.clone());
 
-        ctx.set_vertex_buffer(1, &self.instance_buffer);
+        ctx.draw_light_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
 
-        rw.draw_light_model_instanced(&ctx, &self.obj_model, 0..self.instances.len() as u32);
-
-        rw.draw_model_instanced(&ctx, &self.obj_model, 0..self.instances.len() as u32);
+        ctx.draw_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
         Ok(())
     }
 }
-
 
 struct App {
     rw: RenderWindow,
@@ -659,7 +655,6 @@ impl RadApp for Renderer {}
 pub async fn _run_loop() -> anyhow::Result<()> {
     env_logger::init();
 
-    Radium::start(|rw| Renderer::new(rw)).await;
+    Radium::start(|rw| Renderer::new(rw)).await?;
     Ok(())
 }
-*/
