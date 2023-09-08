@@ -11,6 +11,8 @@ use winit::{
     window::WindowBuilder,
 };
 
+use crate::gfx::camera::CameraUniform;
+
 use self::{
     hooks::{
         AppSetup, DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput,
@@ -81,6 +83,7 @@ impl Radium {
                     let dt = now - last_dt;
                     last_dt = now;
 
+                    render_window.borrow_mut().update_camera(dt);
                     app.frame_update(dt);
 
                     let mut ctx = render_window.borrow().create_draw_context();
@@ -88,11 +91,7 @@ impl Radium {
                     app.draw_frame(&mut ctx)
                         .expect("Error occured while drawing frame");
 
-                    render_window
-                        .borrow_mut()
-                        .submit_frame()
-                        .expect("Error occured while submitting draw queue to frame");
-                    if let Err(error) = render_window.borrow_mut().submit_frame() {
+                    if let Err(error) = render_window.borrow_mut().submit_draw_ctx(&ctx) {
                         match error {
                             wgpu::SurfaceError::Lost => render_window
                                 .borrow_mut()

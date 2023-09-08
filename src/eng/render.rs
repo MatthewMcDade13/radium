@@ -35,7 +35,9 @@ use self::{
 
 use super::{
     command::{process_draw_queue, RenderCommand},
-    hooks::{DrawFrame, FrameUpdate, InputEventStatus, MouseState},
+    hooks::{
+        DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput, WindowEventHandler,
+    },
     RadApp,
 };
 use anyhow::*;
@@ -67,6 +69,15 @@ pub struct RenderWindow {
 }
 
 impl RenderWindow {
+    pub fn camera(&self) -> &RenderCamera {
+        &self.camera
+    }
+    pub fn camera_mut(&mut self) -> &mut RenderCamera {
+        &mut self.camera
+    }
+    pub fn camera_uniform(&self) -> &CameraUniform {
+        &self.camera.cam.uniform
+    }
     pub const fn handle(&self) -> &Window {
         &self.window
     }
@@ -260,13 +271,19 @@ impl RenderWindow {
 
         let camera = RenderCamera::from_surface(&surface);
 
+        let light_render = light::LightRenderer::new(
+            &surface.device,
+            surface.config.format,
+            camera.layout().as_ref(),
+        );
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
                     camera.layout().as_ref(),
-                    // &light_bind_group_layout,
+                    light_render.layout().as_ref(),
                 ],
                 push_constant_ranges: &[],
             });
@@ -287,12 +304,6 @@ impl RenderWindow {
         };
 
         let depth_texture = Texture::depth_texture(&device, &config, "Depth Texture".into());
-
-        let light_render = light::LightRenderer::new(
-            &surface.device,
-            surface.config.format,
-            camera.layout().as_ref(),
-        );
 
         let s = Self {
             surface,
@@ -327,6 +338,31 @@ impl RenderWindow {
     // Result::Ok(s)
     // }
     //
+    //
+    //
+    pub fn update_camera(&mut self, dt: std::time::Duration) {
+        self.camera.frame_update(dt);
+        self.set_camera_uniform(CameraUniform::from_camera(
+            &self.camera.cam.cam,
+            &self.camera.projection,
+        ));
+        self.write_camera_buffer();
+    }
+    pub fn set_camera_uniform(&mut self, uniform: CameraUniform) {
+        self.camera.set_uniform(uniform);
+    }
+
+    pub fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
+        self.surface.queue.write_buffer(buffer, offset, data);
+    }
+
+    pub fn write_camera_buffer(&self) {
+        self.write_buffer(
+            &self.camera.buffer,
+            0,
+            bytemuck::cast_slice(&[*self.camera_uniform()]),
+        );
+    }
     pub fn create_draw_context(&self) -> DrawCtx {
         DrawCtx::from_window(self)
     }
@@ -523,7 +559,30 @@ pub struct RenderCamera {
     projection: Projection,
 }
 
+impl ProcessInput for RenderCamera {
+    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
+        self.cam.process_keyboard(key, state)
+    }
+
+    fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
+        self.cam.process_mouse(mouse_dx, mouse_dy);
+    }
+
+    fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
+        self.cam.process_scroll(delta);
+    }
+}
+
+impl FrameUpdate for RenderCamera {
+    fn frame_update(&mut self, dt: Duration) {
+        self.cam.frame_update(dt);
+    }
+}
+
 impl RenderCamera {
+    pub fn set_uniform(&mut self, uniform: CameraUniform) {
+        self.cam.uniform = uniform;
+    }
     /// Creates a RenderCamera from a RenderWindow with default values.
     pub fn from_surface(rs: &RenderSurface) -> Self {
         let camera = Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
@@ -703,6 +762,10 @@ pub mod light {
         }
         pub fn pipeline(&self) -> Arc<wgpu::RenderPipeline> {
             self.render_pipeline.clone()
+        }
+
+        pub fn layout(&self) -> Arc<wgpu::BindGroupLayout> {
+            self.layout.clone()
         }
     }
 

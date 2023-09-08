@@ -3,6 +3,7 @@ use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc, time::Duration};
 use actix::{Arbiter, SyncArbiter, System};
 use cgmath::prelude::*;
 use eng::{
+    command::RenderCommand,
     hooks::{
         AppSetup, DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput,
         WindowEventHandler,
@@ -52,25 +53,25 @@ pub struct GfxState {
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     clear_color: wgpu::Color,
-    render_pipeline: wgpu::RenderPipeline,
+    render_pipeline: Arc<wgpu::RenderPipeline>,
 
     camera: PanCamera,
     projection: Projection,
-    cam_buffer: wgpu::Buffer,
-    cam_bind_group: wgpu::BindGroup,
+    cam_buffer: Arc<wgpu::Buffer>,
+    cam_bind_group: Arc<wgpu::BindGroup>,
 
     mouse_pressed: bool,
 
     instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
+    instance_buffer: Arc<wgpu::Buffer>,
 
     depth_texture: Texture,
     obj_model: Model,
 
-    light_render_pipeline: wgpu::RenderPipeline,
+    light_render_pipeline: Arc<wgpu::RenderPipeline>,
     light_uniform: LightUniform,
-    light_buffer: wgpu::Buffer,
-    light_bind_group: wgpu::BindGroup,
+    light_buffer: Arc<wgpu::Buffer>,
+    light_bind_group: Arc<wgpu::BindGroup>,
 }
 
 impl GfxState {
@@ -328,6 +329,13 @@ impl GfxState {
                 shader,
             )
         };
+        let cam_buffer = Arc::new(cam_buffer);
+        let cam_bind_group = Arc::new(cam_bind_group);
+        let instance_buffer = Arc::new(instance_buffer);
+        let light_buffer = Arc::new(light_buffer);
+        let light_bind_group = Arc::new(light_bind_group);
+        let light_render_pipeline = Arc::new(light_render_pipeline);
+        let render_pipeline = Arc::new(render_pipeline);
 
         Ok(Self {
             window,
@@ -482,21 +490,74 @@ impl GfxState {
                     stencil_ops: None,
                 }),
             });
-            // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-            // render_pass.set_pipeline(&self.light_render_pipeline);
-            // draw_light_model(
-            // &self.obj_model,
-            // &self.cam_bind_group,
-            // &self.light_bind_group,
-            // );
-            // render_pass.set_pipeline(&self.render_pipeline);
-            // draw_model_instanced(
-            // &self.obj_model,
-            // 0..self.instances.len() as u32,
-            // &self.cam_bind_group,
-            // &self.light_bind_group, // NEW
-            // );
+            render_pass.set_pipeline(&self.light_render_pipeline);
+
+            let mut cmds = Vec::new();
+            let mut rp = render_pass;
+            cmds.push(RenderCommand::SetPipeline(
+                self.light_render_pipeline.clone(),
+            ));
+            let commands = draw_light_model(
+                &self.obj_model,
+                self.cam_bind_group.clone(),
+                self.light_bind_group.clone(),
+            );
+            cmds.extend(commands);
+            cmds.push(RenderCommand::SetPipeline(self.render_pipeline.clone()));
+            let commands = draw_model_instanced(
+                &self.obj_model,
+                0..self.instances.len() as u32,
+                self.cam_bind_group.clone(),
+                self.light_bind_group.clone(),
+            );
+            cmds.extend(commands);
+
+            for cmd in cmds.iter() {
+                match cmd {
+                    RenderCommand::SetPipeline(pipeline) => rp.set_pipeline(&pipeline),
+                    RenderCommand::SetBindGroup(slot, bind_group, offsets) => {
+                        let offsets = match offsets {
+                            Some(os) => os.as_slice(),
+                            None => &[],
+                        };
+                        rp.set_bind_group(*slot, bind_group.as_ref(), offsets);
+                    }
+                    RenderCommand::SetBlendConstant(color) => rp.set_blend_constant(*color),
+                    RenderCommand::SetIndexBuffer(buffer, index_format) => {
+                        rp.set_index_buffer(buffer.slice(..), *index_format)
+                    }
+                    RenderCommand::SetVertexBuffer(slot, buffer) => {
+                        rp.set_vertex_buffer(*slot, buffer.slice(..))
+                    }
+                    RenderCommand::SetScissorRect(x, y, width, height) => {
+                        rp.set_scissor_rect(*x, *y, *width, *height)
+                    }
+                    RenderCommand::SetViewPort(x, y, w, h, min_depth, max_depth) => {
+                        rp.set_viewport(*x, *y, *w, *h, *min_depth, *max_depth)
+                    }
+                    RenderCommand::SetStencilReference(reference) => {
+                        rp.set_stencil_reference(*reference)
+                    }
+                    RenderCommand::Draw(vertices, instances) => {
+                        rp.draw(vertices.clone(), instances.clone())
+                    }
+                    RenderCommand::InsertDebugMarker(label) => rp.insert_debug_marker(&label),
+                    RenderCommand::PushDebugGroup(label) => rp.push_debug_group(&label),
+                    RenderCommand::PopDebugGroup => rp.pop_debug_group(),
+                    RenderCommand::DrawIndexed(indices, base_vertex, instances) => {
+                        rp.draw_indexed(indices.clone(), *base_vertex, instances.clone())
+                    }
+                    RenderCommand::DrawIndirect(indirect_buffer, indirect_offset) => {
+                        rp.draw_indirect(&indirect_buffer, *indirect_offset)
+                    }
+                    RenderCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset) => {
+                        rp.draw_indexed_indirect(&indirect_buffer, *indirect_offset)
+                    }
+                    RenderCommand::ExecuteBundles() => todo!(),
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -505,7 +566,7 @@ impl GfxState {
     }
 }
 
-pub async fn run_loop() -> anyhow::Result<()> {
+pub async fn _run_loop() -> anyhow::Result<()> {
     env_logger::init();
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop)?;
@@ -576,6 +637,7 @@ struct Renderer {
     instances: Vec<Instance>,
     instance_buffer: Arc<wgpu::Buffer>,
     obj_model: Model,
+    window: Rc<RefCell<RenderWindow>>,
 }
 
 impl Renderer {
@@ -625,6 +687,7 @@ impl Renderer {
             instances,
             instance_buffer,
             obj_model,
+            window: window.clone(),
         })
     }
 }
@@ -633,9 +696,9 @@ impl DrawFrame for Renderer {
     fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError> {
         ctx.set_vertex_buffer(1, self.instance_buffer.clone());
 
-        ctx.draw_light_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
-
+        ctx.draw_light_model(&self.obj_model);
         ctx.draw_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
+
         Ok(())
     }
 }
@@ -646,13 +709,65 @@ struct App {
 }
 impl FrameUpdate for Renderer {
     fn frame_update(&mut self, dt: Duration) {
-        todo!()
+
+        // self.queue.write_buffer(
+        // &self.cam_buffer,
+        // 0,
+        // bytemuck::cast_slice(&[self.camera.uniform]),
+        // );
+
+        // let old_pos = {
+        // let cgmath::Vector4 { x, y, z, .. } = self.light_uniform.position.into();
+        // cgmath::Vector3::new(x, y, z)
+        // };
+        // self.light_uniform.position = {
+        // let cgmath::Vector3 { x, y, z } = cgmath::Quaternion::from_axis_angle(
+        // (0.0, 1.0, 0.0).into(),
+        // cgmath::Deg(60.0 * dt.as_secs_f32()),
+        // ) * old_pos;
+        // [x, y, z, 0.0]
+        // };
+        // self.queue.write_buffer(
+        // &self.light_buffer,
+        // 0,
+        // bytemuck::cast_slice(&[self.light_uniform]),
+        // );
     }
 }
-impl WindowEventHandler for Renderer {}
+impl WindowEventHandler for Renderer {
+    fn handle_window_events(&mut self, event: &WindowEvent) -> InputEventStatus {
+        let mut window = self.window.borrow_mut();
+        let camera = window.camera_mut();
+        match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        virtual_keycode: Some(key),
+                        state,
+                        ..
+                    },
+                ..
+            } => camera.process_keyboard(*key, *state).into(),
+            WindowEvent::MouseWheel { delta, .. } => {
+                camera.process_scroll(delta);
+                InputEventStatus::Processing
+            }
+            WindowEvent::MouseInput {
+                button: MouseButton::Left,
+                state,
+                ..
+            } => {
+                // self.mouse_pressed = *state == ElementState::Pressed;
+                // true
+                InputEventStatus::Processing
+            }
+            _ => InputEventStatus::Done,
+        }
+    }
+}
 impl ProcessInput for Renderer {}
 impl RadApp for Renderer {}
-pub async fn _run_loop() -> anyhow::Result<()> {
+pub async fn run_loop() -> anyhow::Result<()> {
     env_logger::init();
 
     Radium::start(|rw| Renderer::new(rw)).await?;
