@@ -1,4 +1,6 @@
-use wgpu::VertexAttribute;
+use std::sync::Arc;
+
+use wgpu::{util::DeviceExt, VertexAttribute};
 const TEMP: u32 = 0;
 
 pub struct Instance {

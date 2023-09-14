@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::wgpu::texture::Texture;
 
 pub struct Model {
@@ -7,8 +9,8 @@ pub struct Model {
 
 pub struct Mesh {
     pub name: String,
-    pub vert_buff: wgpu::Buffer,
-    pub index_buff: wgpu::Buffer,
+    pub vert_buff: Arc<wgpu::Buffer>,
+    pub index_buff: Arc<wgpu::Buffer>,
     pub num_elements: u32,
     pub material: usize, // ???
 }
@@ -17,7 +19,7 @@ pub struct Material {
     pub name: String,
     pub diffuse_texture: Texture,
     pub normal_texture: Texture,
-    pub bind_group: wgpu::BindGroup,
+    pub bind_group: Arc<wgpu::BindGroup>,
 }
 
 impl Material {
@@ -51,6 +53,7 @@ impl Material {
             label: name,
         });
 
+        let bind_group = Arc::new(bind_group);
         Self {
             name: String::from(name.unwrap_or_default()),
             diffuse_texture,

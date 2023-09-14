@@ -1,2 +1,24 @@
-pub mod hooks;
-const TEMP: u32 = 0;
+use std::{
+    cell::{Cell, RefCell},
+    future::Future,
+    rc::Rc,
+    time::Duration,
+};
+
+use winit::{
+    event::{
+        DeviceEvent, ElementState, Event, KeyboardInput, MouseScrollDelta, VirtualKeyCode,
+        WindowEvent,
+    },
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
+
+use crate::gfx::{self, camera::CameraUniform};
+
+use self::render::RenderWindow;
+
+pub mod command;
+
+pub mod app;
+pub mod render;

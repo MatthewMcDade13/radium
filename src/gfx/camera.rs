@@ -7,7 +7,7 @@ use winit::{
 };
 
 use crate::{
-    eng::hooks::{FrameUpdate, ProcessInput, WindowEventHandler},
+    eng::app::InputEventStatus,
     sys::math::{OPENGL_TO_WGPU_MATRIX, SAFE_FRAC_PI_2},
 };
 
@@ -103,16 +103,14 @@ impl CameraControl {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct PlayerCamera {
+pub struct PanCamera {
     pub cam: Camera,
     pub uniform: CameraUniform,
     pub ctrl: CameraControl,
 }
 
-impl PlayerCamera {}
-
-impl FrameUpdate for PlayerCamera {
-    fn frame_update(&mut self, dt: Duration) {
+impl PanCamera {
+    pub fn frame_update(&mut self, dt: Duration) {
         let dt = dt.as_secs_f32();
 
         // movement froward/back left/right
@@ -149,10 +147,12 @@ impl FrameUpdate for PlayerCamera {
             self.cam.pitch = Rad(SAFE_FRAC_PI_2);
         }
     }
-}
 
-impl ProcessInput for PlayerCamera {
-    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> bool {
+    pub fn process_keyboard(
+        &mut self,
+        key: VirtualKeyCode,
+        state: ElementState,
+    ) -> InputEventStatus {
         let amount = if state == ElementState::Pressed {
             1.0
         } else {
@@ -161,44 +161,46 @@ impl ProcessInput for PlayerCamera {
         match key {
             VirtualKeyCode::W | VirtualKeyCode::Up => {
                 self.ctrl.units_forward = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::S | VirtualKeyCode::Down => {
                 self.ctrl.units_back = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::A | VirtualKeyCode::Left => {
                 self.ctrl.units_left = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::D | VirtualKeyCode::Right => {
                 self.ctrl.units_right = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::Space => {
                 self.ctrl.units_up = amount;
-                true
+                InputEventStatus::Processing
             }
             VirtualKeyCode::LControl => {
                 self.ctrl.units_down = amount;
-                true
+                InputEventStatus::Processing
             }
-            _ => false,
+            _ => InputEventStatus::Done,
         }
     }
 
-    fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
+    pub fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
         self.ctrl.horizontal_rotation = mouse_dx as f32;
         self.ctrl.vertical_rotation = mouse_dy as f32;
     }
 
-    fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
+    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
         self.ctrl.scroll = -match delta {
             MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
             MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
         };
     }
 }
+
+impl PanCamera {}
 
 pub struct Projection {
     aspect: f32,
