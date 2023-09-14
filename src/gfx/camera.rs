@@ -7,7 +7,7 @@ use winit::{
 };
 
 use crate::{
-    eng::hooks::{FrameUpdate, InputEventStatus, ProcessInput, WindowEventHandler},
+    eng::app::InputEventStatus,
     sys::math::{OPENGL_TO_WGPU_MATRIX, SAFE_FRAC_PI_2},
 };
 
@@ -109,10 +109,8 @@ pub struct PanCamera {
     pub ctrl: CameraControl,
 }
 
-impl PanCamera {}
-
-impl FrameUpdate for PanCamera {
-    fn frame_update(&mut self, dt: Duration) {
+impl PanCamera {
+    pub fn frame_update(&mut self, dt: Duration) {
         let dt = dt.as_secs_f32();
 
         // movement froward/back left/right
@@ -149,10 +147,12 @@ impl FrameUpdate for PanCamera {
             self.cam.pitch = Rad(SAFE_FRAC_PI_2);
         }
     }
-}
 
-impl ProcessInput for PanCamera {
-    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
+    pub fn process_keyboard(
+        &mut self,
+        key: VirtualKeyCode,
+        state: ElementState,
+    ) -> InputEventStatus {
         let amount = if state == ElementState::Pressed {
             1.0
         } else {
@@ -187,18 +187,20 @@ impl ProcessInput for PanCamera {
         }
     }
 
-    fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
+    pub fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
         self.ctrl.horizontal_rotation = mouse_dx as f32;
         self.ctrl.vertical_rotation = mouse_dy as f32;
     }
 
-    fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
+    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
         self.ctrl.scroll = -match delta {
             MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
             MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
         };
     }
 }
+
+impl PanCamera {}
 
 pub struct Projection {
     aspect: f32,

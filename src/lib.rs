@@ -3,13 +3,9 @@ use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc, time::Duration};
 use actix::{Arbiter, SyncArbiter, System};
 use cgmath::prelude::*;
 use eng::{
+    app::{InputEventStatus, RadApp, Radium},
     command::RenderCommand,
-    hooks::{
-        AppSetup, DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput,
-        WindowEventHandler,
-    },
     render::{light::draw_light_model, mesh::draw_model_instanced, RenderWindow},
-    RadApp, Radium,
 };
 use gfx::{
     camera::{Camera, CameraControl, CameraUniform, PanCamera, Projection},
@@ -692,22 +688,7 @@ impl Renderer {
     }
 }
 
-impl DrawFrame for Renderer {
-    fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError> {
-        ctx.set_vertex_buffer(1, self.instance_buffer.clone());
-
-        ctx.draw_light_model(&self.obj_model);
-        ctx.draw_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
-
-        Ok(())
-    }
-}
-
-struct App {
-    rw: RenderWindow,
-    renderer: Renderer,
-}
-impl FrameUpdate for Renderer {
+impl RadApp for Renderer {
     fn frame_update(&mut self, dt: Duration) {
 
         // self.queue.write_buffer(
@@ -733,8 +714,7 @@ impl FrameUpdate for Renderer {
         // bytemuck::cast_slice(&[self.light_uniform]),
         // );
     }
-}
-impl WindowEventHandler for Renderer {
+
     fn handle_window_events(&mut self, event: &WindowEvent) -> InputEventStatus {
         let mut window = self.window.borrow_mut();
         let camera = window.camera_mut();
@@ -764,9 +744,17 @@ impl WindowEventHandler for Renderer {
             _ => InputEventStatus::Done,
         }
     }
+
+    fn draw_frame(&mut self, ctx: &mut gfx::draw::DrawCtx) -> Result<(), wgpu::SurfaceError> {
+        ctx.set_vertex_buffer(1, self.instance_buffer.clone());
+
+        ctx.draw_light_model(&self.obj_model);
+        ctx.draw_model_instanced(&self.obj_model, 0..self.instances.len() as u32);
+
+        Ok(())
+    }
 }
-impl ProcessInput for Renderer {}
-impl RadApp for Renderer {}
+
 pub async fn run_loop() -> anyhow::Result<()> {
     env_logger::init();
 

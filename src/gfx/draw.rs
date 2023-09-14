@@ -15,6 +15,7 @@ use super::model::{Material, Mesh, Model};
 
 pub struct DrawCtx {
     command_queue: Vec<RenderCommand>,
+    gfx_queue: Arc<wgpu::Queue>,
     camera_bind_group: Arc<wgpu::BindGroup>,
     light_bind_group: Arc<wgpu::BindGroup>,
     light_render_pipeline: Arc<wgpu::RenderPipeline>,
@@ -76,6 +77,9 @@ pub enum RenderCommand {
 * */
 
 impl DrawCtx {
+    pub fn write_buffer(&self, dst: Arc<wgpu::Buffer>, offset: u64, data: &[u8]) {
+        self.gfx_queue.write_buffer(dst.as_ref(), offset, data);
+    }
     pub const fn command_queue(&self) -> &Vec<RenderCommand> {
         &self.command_queue
     }
@@ -87,6 +91,7 @@ impl DrawCtx {
             light_bind_group: window.light_bind_group(),
             light_render_pipeline: window.light_render_pipeline(),
             render_pipeline: window.pipeline(),
+            gfx_queue: window.gfx_queue(),
         }
     }
 

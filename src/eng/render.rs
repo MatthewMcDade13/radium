@@ -34,18 +34,15 @@ use self::{
 };
 
 use super::{
+    app::{InputEventStatus, MouseState},
     command::{process_draw_queue, RenderCommand},
-    hooks::{
-        DrawFrame, FrameUpdate, InputEventStatus, MouseState, ProcessInput, WindowEventHandler,
-    },
-    RadApp,
 };
 use anyhow::*;
 
 pub struct RenderSurface {
     su: wgpu::Surface,
     device: wgpu::Device,
-    queue: wgpu::Queue,
+    queue: Arc<wgpu::Queue>,
     config: wgpu::SurfaceConfiguration,
 }
 
@@ -69,6 +66,9 @@ pub struct RenderWindow {
 }
 
 impl RenderWindow {
+    pub fn gfx_queue(&self) -> Arc<wgpu::Queue> {
+        self.surface.queue.clone()
+    }
     pub fn camera(&self) -> &RenderCamera {
         &self.camera
     }
@@ -185,7 +185,7 @@ impl RenderWindow {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS,
                     limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
@@ -218,6 +218,7 @@ impl RenderWindow {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        let queue = Arc::new(queue);
 
         let surface = RenderSurface {
             su: surface,
@@ -559,22 +560,26 @@ pub struct RenderCamera {
     projection: Projection,
 }
 
-impl ProcessInput for RenderCamera {
-    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
+impl RenderCamera {
+    pub fn process_keyboard(
+        &mut self,
+        key: VirtualKeyCode,
+        state: ElementState,
+    ) -> InputEventStatus {
         self.cam.process_keyboard(key, state)
     }
 
-    fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
+    pub fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {
         self.cam.process_mouse(mouse_dx, mouse_dy);
     }
 
-    fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
+    pub fn process_scroll(&mut self, delta: &winit::event::MouseScrollDelta) {
         self.cam.process_scroll(delta);
     }
 }
 
-impl FrameUpdate for RenderCamera {
-    fn frame_update(&mut self, dt: Duration) {
+impl RenderCamera {
+    pub fn frame_update(&mut self, dt: Duration) {
         self.cam.frame_update(dt);
     }
 }
