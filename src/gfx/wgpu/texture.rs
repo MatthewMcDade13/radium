@@ -5,7 +5,7 @@ pub enum TextureType {
     Diffuse,
     Normal,
 }
-
+#[derive(Debug)]
 pub struct Texture {
     pub handle: wgpu::Texture,
     pub view: wgpu::TextureView,
@@ -92,7 +92,9 @@ impl Texture {
                 TextureType::Diffuse => wgpu::TextureFormat::Rgba8UnormSrgb,
                 TextureType::Normal => wgpu::TextureFormat::Rgba8Unorm,
             },
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
 

@@ -1,5 +1,6 @@
 use std::{
-    cell::{Cell, RefCell},
+    borrow::BorrowMut,
+    cell::{Cell, Ref, RefCell, RefMut},
     collections::VecDeque,
     ops::Range,
     rc::Rc,
@@ -35,19 +36,43 @@ use self::{
 
 use super::{
     app::{InputEventStatus, MouseState},
-    command::{process_draw_queue, RenderCommand},
+    command::RenderCommand,
 };
 use anyhow::*;
 
-pub struct RenderSurface {
-    su: wgpu::Surface,
-    device: wgpu::Device,
-    queue: Arc<wgpu::Queue>,
-    config: wgpu::SurfaceConfiguration,
+#[derive(Debug)]
+pub struct DeviceSurface {
+    pub surface: wgpu::Surface,
+    pub device: wgpu::Device,
+    pub queue: Arc<wgpu::Queue>,
+    pub config: RefCell<wgpu::SurfaceConfiguration>,
+}
+
+impl DeviceSurface {
+    #[inline]
+    pub fn height(&self) -> u32 {
+        self.config.borrow().height
+    }
+
+    #[inline]
+    pub fn width(&self) -> u32 {
+        self.config.borrow().width
+    }
+
+    pub fn get_current_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+        self.surface.get_current_texture()
+    }
+
+    pub fn create_command_encoder(&self) -> wgpu::CommandEncoder {
+        self.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Command Encoder"),
+            })
+    }
 }
 
 pub struct RenderWindow {
-    surface: RenderSurface,
+    device_surface: Rc<DeviceSurface>,
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
     clear_color: wgpu::Color,
@@ -57,21 +82,21 @@ pub struct RenderWindow {
 
     light_render: light::LightRenderer,
 
-    depth_texture: Texture,
+    depth_texture: Rc<Texture>,
 
     event_loop: Option<Rc<EventLoop<()>>>,
     mouse_state: MouseState,
     texture_bind_group_layout: wgpu::BindGroupLayout,
-    command_queue: Vec<RenderCommand>,
 }
 
 impl RenderWindow {
     pub fn gfx_queue(&self) -> Arc<wgpu::Queue> {
-        self.surface.queue.clone()
+        self.device_surface.queue.clone()
     }
     pub fn camera(&self) -> &RenderCamera {
         &self.camera
     }
+
     pub fn camera_mut(&mut self) -> &mut RenderCamera {
         &mut self.camera
     }
@@ -86,7 +111,11 @@ impl RenderWindow {
     }
 
     pub fn surface_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
-        self.surface.su.get_current_texture()
+        self.device_surface().get_current_texture()
+    }
+
+    pub fn device_surface(&self) -> &Rc<DeviceSurface> {
+        &self.device_surface
     }
 
     #[inline]
@@ -99,7 +128,7 @@ impl RenderWindow {
     }
 
     #[inline]
-    pub fn depth_texture(&self) -> &Texture {
+    pub fn depth_texture(&self) -> &Rc<Texture> {
         &self.depth_texture
     }
 
@@ -115,12 +144,12 @@ impl RenderWindow {
 
     #[inline]
     pub fn device_queue(&self) -> &wgpu::Queue {
-        &self.surface.queue
+        &self.device_surface().queue
     }
 
     #[inline]
     pub fn device(&self) -> &wgpu::Device {
-        &self.surface.device
+        &self.device_surface().device
     }
 
     #[inline]
@@ -129,8 +158,18 @@ impl RenderWindow {
     }
 
     #[inline]
-    pub fn surface_config(&self) -> &wgpu::SurfaceConfiguration {
-        &self.surface.config
+    pub fn surface_config(&self) -> Ref<wgpu::SurfaceConfiguration> {
+        self.device_surface().config.borrow()
+    }
+
+    #[inline]
+    pub fn surface_config_mut(&self) -> RefMut<wgpu::SurfaceConfiguration> {
+        self.device_surface().config.borrow_mut()
+    }
+
+    #[inline]
+    pub fn surface_device(&self) -> &wgpu::Device {
+        &self.device_surface.device
     }
 
     #[inline]
@@ -140,11 +179,6 @@ impl RenderWindow {
 
     pub const fn mouse_state(&self) -> MouseState {
         self.mouse_state
-    }
-
-    #[inline]
-    pub fn command_queue(&self) -> &Vec<RenderCommand> {
-        &self.command_queue
     }
 
     #[inline]
@@ -220,8 +254,9 @@ impl RenderWindow {
         surface.configure(&device, &config);
         let queue = Arc::new(queue);
 
-        let surface = RenderSurface {
-            su: surface,
+        let config = RefCell::new(config);
+        let surface = DeviceSurface {
+            surface,
             device,
             queue,
             config,
@@ -274,7 +309,7 @@ impl RenderWindow {
 
         let light_render = light::LightRenderer::new(
             &surface.device,
-            surface.config.format,
+            surface.config.borrow().format,
             camera.layout().as_ref(),
         );
 
@@ -297,17 +332,22 @@ impl RenderWindow {
             create_render_pipeline(
                 &device,
                 &render_pipeline_layout,
-                config.format,
+                config.borrow().format,
                 Some(Texture::DEPTH_FORMAT),
                 &[Vertex::buffer_layout(), InstanceRaw::buffer_layout()],
                 shader,
             )
         };
 
-        let depth_texture = Texture::depth_texture(&device, &config, "Depth Texture".into());
+        let depth_texture = Rc::new(Texture::depth_texture(
+            &device,
+            &*config.borrow(),
+            "Depth Texture".into(),
+        ));
+        let surface = Rc::new(surface);
 
         let s = Self {
-            surface,
+            device_surface: surface,
             size,
             window,
             clear_color: wgpu::Color::BLACK,
@@ -318,7 +358,6 @@ impl RenderWindow {
             event_loop: event_loop.into(),
             mouse_state: MouseState::Idle,
             texture_bind_group_layout,
-            command_queue: Vec::new(),
         };
         Ok(s)
     }
@@ -354,7 +393,9 @@ impl RenderWindow {
     }
 
     pub fn write_buffer(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) {
-        self.surface.queue.write_buffer(buffer, offset, data);
+        self.device_surface()
+            .queue
+            .write_buffer(buffer, offset, data);
     }
 
     pub fn write_camera_buffer(&self) {
@@ -368,156 +409,11 @@ impl RenderWindow {
         DrawCtx::from_window(self)
     }
 
-    pub fn submit_draw_ctx(&mut self, ctx: &DrawCtx) -> Result<(), wgpu::SurfaceError> {
-        self.command_queue.extend(ctx.command_queue().clone());
-        self.submit_frame()
-    }
-    pub fn submit_frame(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let mut encoder =
-            self.surface
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Command Encoder"),
-                });
-
-        let frame = self.surface_texture()?;
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        {
-            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: true,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-
-            for cmd in self.command_queue.iter() {
-                match cmd {
-                    RenderCommand::SetPipeline(pipeline) => rp.set_pipeline(&pipeline),
-                    RenderCommand::SetBindGroup(slot, bind_group, offsets) => {
-                        let offsets = match offsets {
-                            Some(os) => os.as_slice(),
-                            None => &[],
-                        };
-                        rp.set_bind_group(*slot, bind_group.as_ref(), offsets);
-                    }
-                    RenderCommand::SetBlendConstant(color) => rp.set_blend_constant(*color),
-                    RenderCommand::SetIndexBuffer(buffer, index_format) => {
-                        rp.set_index_buffer(buffer.slice(..), *index_format)
-                    }
-                    RenderCommand::SetVertexBuffer(slot, buffer) => {
-                        rp.set_vertex_buffer(*slot, buffer.slice(..))
-                    }
-                    RenderCommand::SetScissorRect(x, y, width, height) => {
-                        rp.set_scissor_rect(*x, *y, *width, *height)
-                    }
-                    RenderCommand::SetViewPort(x, y, w, h, min_depth, max_depth) => {
-                        rp.set_viewport(*x, *y, *w, *h, *min_depth, *max_depth)
-                    }
-                    RenderCommand::SetStencilReference(reference) => {
-                        rp.set_stencil_reference(*reference)
-                    }
-                    RenderCommand::Draw(vertices, instances) => {
-                        rp.draw(vertices.clone(), instances.clone())
-                    }
-                    RenderCommand::InsertDebugMarker(label) => rp.insert_debug_marker(label),
-                    RenderCommand::PushDebugGroup(label) => rp.push_debug_group(label),
-                    RenderCommand::PopDebugGroup => rp.pop_debug_group(),
-                    RenderCommand::DrawIndexed(indices, base_vertex, instances) => {
-                        rp.draw_indexed(indices.clone(), *base_vertex, instances.clone())
-                    }
-                    RenderCommand::DrawIndirect(indirect_buffer, indirect_offset) => {
-                        rp.draw_indirect(indirect_buffer, *indirect_offset)
-                    }
-                    RenderCommand::DrawIndexedIndirect(indirect_buffer, indirect_offset) => {
-                        rp.draw_indexed_indirect(indirect_buffer, *indirect_offset)
-                    }
-                    RenderCommand::ExecuteBundles() => todo!(),
-                }
-            }
-        }
-
-        self.surface.queue.submit(std::iter::once(encoder.finish()));
-        self.command_queue.clear();
-        frame.present();
-        std::result::Result::Ok(())
-    }
-
-    pub fn draw_light_model(&mut self, model: &Model) {
-        self.draw_light_model_instanced(model, 0..1);
-    }
-    pub fn draw_light_model_instanced(&mut self, model: &Model, instances: Range<u32>) {
-        self.command_queue
-            .push(RenderCommand::SetPipeline(self.light_render.pipeline()));
-
-        let cmds = draw_light_model_instanced(
-            model,
-            instances,
-            self.camera.bind_group(),
-            self.light_render.bind_group(),
-        );
-        self.command_queue.extend(cmds);
-    }
-    pub fn draw_light_mesh(&mut self, mesh: &Mesh) {
-        self.draw_light_mesh_instanced(mesh, 0..1);
-    }
-    pub fn draw_light_mesh_instanced(&mut self, mesh: &Mesh, instances: Range<u32>) {
-        self.command_queue
-            .push(RenderCommand::SetPipeline(self.light_render.pipeline()));
-        let cmds = draw_light_mesh_instanced(
-            mesh,
-            instances,
-            self.camera.bind_group(),
-            self.light_render.bind_group(),
-        );
-        self.command_queue.extend(cmds);
-    }
-    pub fn draw_mesh(&mut self, mesh: &Mesh, mat: &Material) {
-        self.draw_mesh_instanced(mesh, mat, 0..1);
-    }
-    pub fn draw_mesh_instanced(&mut self, mesh: &Mesh, mat: &Material, instances: Range<u32>) {
-        self.command_queue
-            .push(RenderCommand::SetPipeline(self.pipeline.clone()));
-
-        let cmds = draw_mesh_instanced(
-            mesh,
-            mat,
-            instances,
-            self.camera.bind_group(),
-            self.light_render.bind_group(),
-        );
-        self.command_queue.extend(cmds);
-    }
-
-    pub fn draw_model(&mut self, model: &Model) {
-        self.draw_model_instanced(model, 0..1);
-    }
-    pub fn draw_model_instanced(&mut self, model: &Model, instances: Range<u32>) {
-        self.command_queue
-            .push(RenderCommand::SetPipeline(self.pipeline.clone()));
-
-        let cmds = draw_model_instanced(
-            model,
-            instances,
-            self.camera.bind_group(),
-            self.light_render.bind_group(),
-        );
-        self.command_queue.extend(cmds);
+    // pub fn submit_draw_ctx(&mut self, ctx: &DrawCtx) -> Result<(), wgpu::SurfaceError> {
+    // self.submit_frame()
+    // }
+    pub fn submit_frame(&self, ctx: DrawCtx) -> Result<(), wgpu::SurfaceError> {
+        ctx.submit()
     }
 
     // window: &'a RenderWindow,
@@ -534,16 +430,17 @@ impl RenderWindow {
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
-            self.surface.config.width = new_size.width;
-            self.surface.config.height = new_size.height;
-            self.surface
-                .su
-                .configure(&self.surface.device, &self.surface.config);
-            self.depth_texture = Texture::depth_texture(
-                &self.surface.device,
-                &self.surface.config,
-                Some("Depth Texture"),
-            );
+
+            self.surface_config_mut().width = new_size.width;
+            self.surface_config_mut().height = new_size.height;
+            self.device_surface
+                .surface
+                .configure(self.surface_device(), &*self.surface_config());
+            self.depth_texture = {
+                let c = self.surface_config();
+                let t = Texture::depth_texture(self.surface_device(), &*c, Some("Depth Texture"));
+                Rc::new(t)
+            }
         }
 
         self.camera
@@ -589,15 +486,9 @@ impl RenderCamera {
         self.cam.uniform = uniform;
     }
     /// Creates a RenderCamera from a RenderWindow with default values.
-    pub fn from_surface(rs: &RenderSurface) -> Self {
+    pub fn from_surface(rs: &DeviceSurface) -> Self {
         let camera = Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
-        let projection = Projection::new(
-            rs.config.width,
-            rs.config.height,
-            cgmath::Deg(45.0),
-            0.1,
-            100.0,
-        );
+        let projection = Projection::new(rs.width(), rs.height(), cgmath::Deg(45.0), 0.1, 100.0);
 
         let cam_uniform = CameraUniform::from_camera(&camera, &projection);
         let device = &rs.device;

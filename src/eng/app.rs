@@ -14,7 +14,6 @@ use crate::gfx;
 use super::render::RenderWindow;
 
 pub trait RadApp {
-    // TODO :: Refactor this to return enum instead of bool.
     fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
         InputEventStatus::Done
     }
@@ -111,11 +110,12 @@ impl Radium {
                     app.frame_update(dt);
 
                     let mut ctx = render_window.borrow().create_draw_context();
+                    ctx.begin_render_pass();
 
                     app.draw_frame(&mut ctx)
                         .expect("Error occured while drawing frame");
 
-                    if let Err(error) = render_window.borrow_mut().submit_draw_ctx(&ctx) {
+                    if let Err(error) = ctx.submit() {
                         match error {
                             wgpu::SurfaceError::Lost => render_window
                                 .borrow_mut()
