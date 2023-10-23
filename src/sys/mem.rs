@@ -73,7 +73,7 @@ impl<const S: usize> StackAllocator<S> {
         unsafe {
             // let offset = self.stack.as_mut_ptr().align_offset(align_of::<u8>());
             let ptr = self.stack.as_mut_ptr().add(self.top);
-            let offset = ptr.align_offset(align_of::<u8>());
+            let offset = ptr.align_offset(align_of::<T>());
             let ptr = ptr.add(offset).cast::<T>();
             std::ptr::write(ptr, data);
             self.top += data_size + offset;
@@ -171,6 +171,8 @@ impl<T> PoolAllocator<T> {
     fn at_mut(&mut self, slot: isize) -> &mut PoolCell<T> {
         unsafe {
             let ptr = self.buf.offset(slot);
+            let offset = ptr.align_offset(align_of::<T>());
+            let ptr = ptr.add(offset);
             &mut *ptr
         }
     }
@@ -251,7 +253,6 @@ impl BumpAllocator {
         }
     }
 
-    // #![feature(ptr_from_ref)]
     pub fn alloc<T>(&mut self, data: T) -> anyhow::Result<BumpPtr<T>> {
         unsafe {
             let data_size = std::mem::size_of::<T>();
@@ -262,7 +263,7 @@ impl BumpAllocator {
             }
 
             let ptr = self.buf.add(self.size);
-            let offset = ptr.align_offset(align_of::<u8>());
+            let offset = ptr.align_offset(align_of::<T>());
             let ptr = ptr.add(offset).cast::<T>();
             std::ptr::write(ptr, data);
             self.size += data_size + offset;

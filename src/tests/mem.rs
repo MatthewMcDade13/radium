@@ -19,9 +19,9 @@ mod tests {
             assert_eq!(56., *y);
             assert_eq!(p.x, 56.0);
             assert_eq!(p.y, 69.0);
-        }
 
-        sa.clear();
+            sa.clear();
+        }
 
         let x = sa.alloc(String::from("aye lmao"))?;
         assert_eq!(*x, "aye lmao");
@@ -41,9 +41,9 @@ mod tests {
             assert_eq!(usize::MAX, *y);
             assert_eq!(p.x, 56.0);
             assert_eq!(p.y, 69.0);
-        }
 
-        ba.clear();
+            ba.clear();
+        }
 
         let x = ba.alloc(String::from("aye lmao"))?;
         assert_eq!(*x, "aye lmao");
