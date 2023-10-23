@@ -11,7 +11,7 @@ use winit::{
 
 use crate::gfx;
 
-use super::render::RenderWindow;
+use super::{command::RenderPassOp, render::RenderWindow};
 
 pub trait RadApp {
     fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
@@ -110,7 +110,7 @@ impl Radium {
                     app.frame_update(dt);
 
                     let mut ctx = render_window.borrow().create_draw_context();
-                    ctx.begin_render_pass();
+                    ctx.begin_render_pass(RenderPassOp::CLEAR_BLACK);
 
                     app.draw_frame(&mut ctx)
                         .expect("Error occured while drawing frame");

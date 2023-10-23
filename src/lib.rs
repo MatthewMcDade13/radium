@@ -14,7 +14,7 @@ use gfx::{
     wgpu::{
         buffer::{Instance, InstanceRaw},
         texture::{Texture, TextureType},
-        vertex::Vertex,
+        vertex::Vertex3D,
     },
 };
 use sys::fs::load_model;
@@ -32,6 +32,9 @@ use crate::gfx::{light::LightUniform, wgpu::buffer::create_render_pipeline};
 mod eng;
 mod gfx;
 mod sys;
+
+#[cfg(test)]
+mod tests;
 
 const NUM_INSTANCES_PER_ROW: u32 = 10;
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
@@ -262,7 +265,7 @@ impl GfxState {
                 &render_pipeline_layout,
                 config.format,
                 Some(Texture::DEPTH_FORMAT),
-                &[Vertex::buffer_layout(), InstanceRaw::buffer_layout()],
+                &[Vertex3D::buffer_layout(), InstanceRaw::buffer_layout()],
                 shader,
             )
         };
@@ -321,7 +324,7 @@ impl GfxState {
                 &layout,
                 config.format,
                 Some(Texture::DEPTH_FORMAT),
-                &[Vertex::buffer_layout()],
+                &[Vertex3D::buffer_layout()],
                 shader,
             )
         };

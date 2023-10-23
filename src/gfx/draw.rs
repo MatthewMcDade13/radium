@@ -3,7 +3,7 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 use wgpu::{BufferAddress, DynamicOffset, IndexFormat};
 
 use crate::eng::{
-    command::{RenderCommand, RenderPass},
+    command::{RenderCommand, RenderPass, RenderPassOp},
     render::{
         light::{draw_light_mesh_instanced, draw_light_model_instanced},
         mesh::{draw_mesh_instanced, draw_model_instanced},
@@ -59,8 +59,8 @@ impl DrawCtx {
         }
     }
 
-    pub fn begin_render_pass(&mut self) {
-        self.passes.push(RenderPass::from_draw_ctx(self));
+    pub fn begin_render_pass(&mut self, op: RenderPassOp) {
+        self.passes.push(RenderPass::from_draw_ctx(self, op));
     }
 
     pub fn current_pass_mut(&mut self) -> &mut RenderPass {

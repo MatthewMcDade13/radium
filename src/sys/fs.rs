@@ -11,7 +11,7 @@ use crate::gfx::{
     model::{Material, Mesh, Model},
     wgpu::{
         texture::{self, TextureType},
-        vertex::Vertex,
+        vertex::Vertex3D,
     },
 };
 
@@ -133,7 +133,7 @@ pub async fn load_model(
         .into_iter()
         .map(|m| {
             let mut verticies = (0..m.mesh.positions.len() / 3)
-                .map(|i| Vertex {
+                .map(|i| Vertex3D {
                     position: [
                         m.mesh.positions[i * 3],
                         m.mesh.positions[i * 3 + 1],

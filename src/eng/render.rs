@@ -25,7 +25,7 @@ use crate::gfx::{
     wgpu::{
         buffer::{create_render_pipeline, InstanceRaw},
         texture::Texture,
-        vertex::Vertex,
+        vertex::Vertex3D,
     },
 };
 
@@ -334,7 +334,7 @@ impl RenderWindow {
                 &render_pipeline_layout,
                 config.borrow().format,
                 Some(Texture::DEPTH_FORMAT),
-                &[Vertex::buffer_layout(), InstanceRaw::buffer_layout()],
+                &[Vertex3D::buffer_layout(), InstanceRaw::buffer_layout()],
                 shader,
             )
         };
@@ -568,7 +568,7 @@ pub mod light {
         gfx::{
             light::LightUniform,
             model::{Mesh, Model},
-            wgpu::{buffer::create_render_pipeline, texture::Texture, vertex::Vertex},
+            wgpu::{buffer::create_render_pipeline, texture::Texture, vertex::Vertex3D},
         },
     };
 
@@ -638,7 +638,7 @@ pub mod light {
                     &layout,
                     format,
                     Some(Texture::DEPTH_FORMAT),
-                    &[Vertex::buffer_layout()],
+                    &[Vertex3D::buffer_layout()],
                     shader,
                 )
             };

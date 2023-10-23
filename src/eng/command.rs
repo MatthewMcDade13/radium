@@ -60,32 +60,43 @@ pub enum RenderCommand {
     /// )
     ExecuteBundles(),
 }
+#[derive(Debug, Clone, Copy)]
+pub enum RenderPassOp {
+    Clear(wgpu::Color),
+    LoadFromMemory,
+}
+
+impl RenderPassOp {
+    pub const CLEAR_BLACK: RenderPassOp = RenderPassOp::Clear(wgpu::Color::BLACK);
+    pub const CLEAR_WHITE: RenderPassOp = RenderPassOp::Clear(wgpu::Color::WHITE);
+}
 
 #[derive(Clone, Debug)]
 pub struct RenderPass {
     pub command_queue: Vec<RenderCommand>,
     pub surface: Rc<DeviceSurface>,
-    pub clear_color: wgpu::Color,
+
     pub depth_texture: Rc<Texture>,
+    pub op: RenderPassOp,
 }
 
 impl RenderPass {
     const DEFAULT_CLEAR_COLOR: wgpu::Color = wgpu::Color::BLACK;
-    pub fn new(surface: &Rc<DeviceSurface>, depth_texture: &Rc<Texture>) -> Self {
+    pub fn new(surface: &Rc<DeviceSurface>, depth_texture: &Rc<Texture>, op: RenderPassOp) -> Self {
         Self {
             command_queue: Vec::with_capacity(32),
             surface: surface.clone(),
-            clear_color: Self::DEFAULT_CLEAR_COLOR,
+            op,
             depth_texture: depth_texture.clone(),
         }
     }
 
-    pub fn from_window(window: &RenderWindow) -> Self {
-        Self::new(window.device_surface(), window.depth_texture())
+    pub fn from_window(window: &RenderWindow, op: RenderPassOp) -> Self {
+        Self::new(window.device_surface(), window.depth_texture(), op)
     }
 
-    pub fn from_draw_ctx(ctx: &DrawCtx) -> Self {
-        Self::new(&ctx.device_surface, &ctx.depth_texture)
+    pub fn from_draw_ctx(ctx: &DrawCtx, op: RenderPassOp) -> Self {
+        Self::new(&ctx.device_surface, &ctx.depth_texture, op)
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -103,7 +114,10 @@ impl RenderPass {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        load: match self.op {
+                            RenderPassOp::Clear(color) => wgpu::LoadOp::Clear(color),
+                            RenderPassOp::LoadFromMemory => wgpu::LoadOp::Load,
+                        },
                         store: true,
                     },
                 })],
@@ -111,7 +125,10 @@ impl RenderPass {
                     Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &self.depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
+                            load: match self.op {
+                                RenderPassOp::Clear(_) => wgpu::LoadOp::Clear(1.0),
+                                RenderPassOp::LoadFromMemory => wgpu::LoadOp::Load,
+                            },
                             store: true,
                         }),
                         stencil_ops: None,
