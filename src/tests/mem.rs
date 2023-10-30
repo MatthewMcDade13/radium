@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use anyhow::bail;
+
     use crate::sys::mem::{BumpAllocator, StackAllocator};
 
     struct Point {
@@ -49,5 +51,20 @@ mod tests {
         assert_eq!(*x, "aye lmao");
 
         Ok(())
+    }
+
+    #[test]
+    fn stack_overflow() -> anyhow::Result<()> {
+        let mut sa = StackAllocator::<4096>::new();
+
+        for i in 0..500 {
+            let x = i as f64;
+            match sa.alloc(Point { x: x * 2., y: x }) {
+                Ok(_) => {}
+                Err(_) => return anyhow::Result::Ok(()),
+            }
+        }
+        sa.clear();
+        bail!("StackAllocator did not fail after 500 entries of struct Point with Allocator buffer size of 4096");
     }
 }

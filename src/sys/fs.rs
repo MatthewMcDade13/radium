@@ -1,5 +1,6 @@
 use std::{
     io::{BufReader, Cursor},
+    rc::Rc,
     sync::Arc,
 };
 const TEMP: u32 = 0;
@@ -9,7 +10,7 @@ use wgpu::util::DeviceExt;
 
 use crate::gfx::{
     model::{Material, Mesh, Model},
-    wgpu::{
+    wgpu_util::{
         texture::{self, TextureType},
         vertex::Vertex3D,
     },
@@ -224,8 +225,8 @@ pub async fn load_model(
                 contents: bytemuck::cast_slice(&m.mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
-            let vert_buff = Arc::new(vert_buff);
-            let index_buff = Arc::new(index_buff);
+            let vert_buff = Rc::new(vert_buff);
+            let index_buff = Rc::new(index_buff);
             Mesh {
                 name: filename.to_string(),
                 vert_buff,

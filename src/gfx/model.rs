@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
-use super::wgpu::texture::Texture;
+use super::wgpu_util::texture::Texture;
 
 pub struct Model {
     pub meshes: Vec<Mesh>,
@@ -9,8 +9,8 @@ pub struct Model {
 
 pub struct Mesh {
     pub name: String,
-    pub vert_buff: Arc<wgpu::Buffer>,
-    pub index_buff: Arc<wgpu::Buffer>,
+    pub vert_buff: Rc<wgpu::Buffer>,
+    pub index_buff: Rc<wgpu::Buffer>,
     pub num_elements: u32,
     pub material: usize, // ???
 }
@@ -19,7 +19,7 @@ pub struct Material {
     pub name: String,
     pub diffuse_texture: Texture,
     pub normal_texture: Texture,
-    pub bind_group: Arc<wgpu::BindGroup>,
+    pub bind_group: Rc<wgpu::BindGroup>,
 }
 
 impl Material {
@@ -53,7 +53,7 @@ impl Material {
             label: name,
         });
 
-        let bind_group = Arc::new(bind_group);
+        let bind_group = Rc::new(bind_group);
         Self {
             name: String::from(name.unwrap_or_default()),
             diffuse_texture,

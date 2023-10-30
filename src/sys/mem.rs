@@ -3,6 +3,7 @@ use std::{
     marker::PhantomData,
     mem::align_of,
     ops::{Deref, DerefMut},
+    rc::Rc,
 };
 
 use anyhow::bail;

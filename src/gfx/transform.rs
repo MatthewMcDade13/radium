@@ -1,5 +1,6 @@
 use cgmath::{Vector3, Zero};
 
+// TODO :: Finish this
 #[derive(Debug, Clone)]
 pub struct Transform {
     position: cgmath::Vector3<f32>,

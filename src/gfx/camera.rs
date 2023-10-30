@@ -1,15 +1,21 @@
 use std::time::Duration;
 
 use cgmath::{perspective, InnerSpace, Matrix4, Point3, Rad, Vector3};
+
 use winit::{
     dpi::PhysicalPosition,
-    event::{ElementState, KeyboardInput, MouseScrollDelta, VirtualKeyCode, WindowEvent},
+    event::{ElementState, MouseScrollDelta, VirtualKeyCode},
 };
 
 use crate::{
     eng::app::InputEventStatus,
     sys::math::{OPENGL_TO_WGPU_MATRIX, SAFE_FRAC_PI_2},
 };
+
+use super::{shader::Uniform, window::DeviceSurface};
+
+// TODO :: This camera shit is a mess... REALLY needs a good refactor after
+// we implement 2D rendering.
 
 #[derive(Debug, Copy, Clone)]
 pub struct Camera {
@@ -75,6 +81,10 @@ impl CameraUniform {
             view_proj: (projection.calc_matrix() * camera.calc_view_matrix()).into(),
         }
     }
+
+    pub fn as_uniform(&self, ds: &DeviceSurface) -> Uniform {
+        Uniform::new(ds, &[*self])
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -102,14 +112,28 @@ impl CameraControl {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct PanCamera {
     pub cam: Camera,
     pub uniform: CameraUniform,
     pub ctrl: CameraControl,
+    pub projection: Projection,
 }
 
 impl PanCamera {
+    pub fn new(ds: &DeviceSurface, speed: f32, sensitivity: f32) -> Self {
+        let cam = Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let projection = Projection::new(ds.width(), ds.height(), cgmath::Deg(45.0), 0.1, 100.0);
+        let ctrl = CameraControl::new(speed, sensitivity);
+        let uniform = CameraUniform::from_camera(&cam, &projection);
+        Self {
+            cam,
+            uniform,
+            ctrl,
+            projection,
+        }
+    }
+
     pub fn frame_update(&mut self, dt: Duration) {
         let dt = dt.as_secs_f32();
 
@@ -198,10 +222,13 @@ impl PanCamera {
             MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
         };
     }
+
+    pub fn create_uniform(&self, ds: &DeviceSurface) -> Uniform {
+        self.uniform.as_uniform(ds)
+    }
 }
 
-impl PanCamera {}
-
+#[derive(Debug, Clone, Copy)]
 pub struct Projection {
     aspect: f32,
     fovy: Rad<f32>,

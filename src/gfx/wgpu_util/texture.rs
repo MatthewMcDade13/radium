@@ -10,10 +10,12 @@ pub struct Texture {
     pub handle: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
+    pub size: cgmath::Vector2<u32>,
 }
 
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub const DEFAULT: [u8; 16] = [0xFF; 16];
 
     pub fn depth_texture(
         device: &wgpu::Device,
@@ -53,6 +55,7 @@ impl Texture {
             handle: texture,
             view,
             sampler,
+            size: cgmath::Vector2::new(size.width, size.height),
         }
     }
 
@@ -129,6 +132,7 @@ impl Texture {
             handle: texture,
             view,
             sampler,
+            size: cgmath::Vector2::new(size.width, size.height),
         })
     }
 }

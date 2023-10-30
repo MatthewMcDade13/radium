@@ -16,8 +16,6 @@ use winit::{
 
 use crate::gfx::{self, camera::CameraUniform};
 
-use self::render::RenderWindow;
-
 pub mod command;
 
 pub mod app;
