@@ -1,9 +1,18 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    rc::Rc,
+    time::Duration,
+};
+
+use wgpu::SurfaceConfiguration;
+use winit::{dpi::PhysicalSize, window::WindowId};
 
 use crate::eng::app::MouseState;
 
 use super::{
     camera::PanCamera,
+    draw::DrawCtx,
+    geom::Rect,
     shader::{Shader, Uniform},
     wgpu_util::{
         texture::{Texture, TextureType},
@@ -16,20 +25,9 @@ pub struct DeviceSurface {
     pub surface: wgpu::Surface,
     pub device: wgpu::Device,
     pub queue: Rc<wgpu::Queue>,
-    pub config: RefCell<wgpu::SurfaceConfiguration>,
 }
 
 impl DeviceSurface {
-    #[inline]
-    pub fn height(&self) -> u32 {
-        self.config.borrow().height
-    }
-
-    #[inline]
-    pub fn width(&self) -> u32 {
-        self.config.borrow().width
-    }
-
     pub fn get_current_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         self.surface.get_current_texture()
     }
@@ -40,12 +38,19 @@ impl DeviceSurface {
                 label: Some("Render Command Encoder"),
             })
     }
+
+    pub fn handle(&self) -> &wgpu::Device {
+        &self.device
+    }
 }
 
+#[derive(Debug)]
 pub struct RenderWindow {
-    device_surface: Rc<DeviceSurface>,
+    pub device_surface: Rc<DeviceSurface>,
+    pub config: wgpu::SurfaceConfiguration,
+
     size: winit::dpi::PhysicalSize<u32>,
-    window: winit::window::Window,
+    window: Rc<winit::window::Window>,
     default_shader: Shader,
 
     camera: PanCamera,
@@ -56,7 +61,27 @@ pub struct RenderWindow {
 }
 
 impl RenderWindow {
-    pub async fn from_winit(window: winit::window::Window) -> anyhow::Result<Self> {
+    pub fn id(&self) -> WindowId {
+        self.window.id()
+    }
+
+    pub fn handle(&self) -> &winit::window::Window {
+        self.window.as_ref()
+    }
+
+    pub fn size(&self) -> PhysicalSize<u32> {
+        self.size
+    }
+
+    pub fn request_redraw(&self) {
+        self.window.request_redraw()
+    }
+
+    pub fn mouse_state(&self) -> MouseState {
+        self.mouse_state
+    }
+
+    pub async fn new(window: winit::window::Window) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -112,22 +137,28 @@ impl RenderWindow {
         surface.configure(&device, &config);
         let queue = Rc::new(queue);
 
-        let config = RefCell::new(config);
         let surface = DeviceSurface {
             surface,
             device,
             queue,
-            config,
         };
 
         let device = &surface.device;
-        let config = &surface.config;
 
-        let camera = PanCamera::new(&surface, 4.0, 0.4);
+        let camera = PanCamera::new(
+            Rect {
+                x: 0.,
+                y: 0.,
+                w: config.width as f32,
+                h: config.height as f32,
+            },
+            4.0,
+            0.4,
+        );
 
         let depth_texture = Rc::new(Texture::depth_texture(
             &device,
-            &*config.borrow(),
+            &config,
             "Depth Texture".into(),
         ));
 
@@ -146,6 +177,7 @@ impl RenderWindow {
         let default_shader = Shader::new(
             shader_src,
             surface.as_ref(),
+            config.format,
             &[Vertex2D::buffer_layout()],
             &[
                 Uniform::from_texture(surface.as_ref(), &white_texture),
@@ -154,6 +186,8 @@ impl RenderWindow {
             Some("Default Sprite Shader"),
         );
 
+        let window = Rc::new(window);
+
         let s = Self {
             device_surface: surface,
             size,
@@ -161,9 +195,36 @@ impl RenderWindow {
             camera,
             depth_texture,
             default_shader,
+            config,
 
             mouse_state: MouseState::Idle,
         };
         Ok(s)
+    }
+
+    pub fn create_draw_context(&self) -> DrawCtx {
+        DrawCtx::new(&self.device_surface, &self.depth_texture)
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.size = new_size;
+
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.device_surface
+                .surface
+                .configure(&self.device_surface.device, &self.config);
+            self.depth_texture = {
+                let c = self.config;
+                let t =
+                    Texture::depth_texture(self.device_surface.handle(), &c, Some("Depth Texture"));
+                Rc::new(t)
+            }
+        }
+
+        self.camera
+            .projection
+            .resize(new_size.width, new_size.height);
     }
 }

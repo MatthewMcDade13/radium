@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use wgpu::{util::DeviceExt, VertexBufferLayout};
+use wgpu::{util::DeviceExt, TextureFormat, VertexBufferLayout};
 
 use crate::eng::command::{CommandQueue, GpuCommand};
 
@@ -260,6 +260,7 @@ use super::{
     window::DeviceSurface,
 };
 
+#[derive(Debug, Clone)]
 pub struct Shader {
     pub pipeline: Rc<wgpu::RenderPipeline>,
     uniforms: Vec<Uniform>,
@@ -270,6 +271,7 @@ impl Shader {
     pub fn new(
         shader_str: &str,
         device_surface: &DeviceSurface,
+        texture_format: TextureFormat,
         vert_layouts: &[VertexBufferLayout<'static>],
         uniforms: &[Uniform],
         label: Option<&str>,
@@ -294,7 +296,7 @@ impl Shader {
         let pipeline = create_render_pipeline(
             device,
             &pipeline_layout,
-            device_surface.config.borrow().format,
+            texture_format,
             Some(Texture::DEPTH_FORMAT),
             vert_layouts,
             shader,

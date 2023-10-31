@@ -12,7 +12,7 @@ use crate::{
     sys::math::{OPENGL_TO_WGPU_MATRIX, SAFE_FRAC_PI_2},
 };
 
-use super::{shader::Uniform, window::DeviceSurface};
+use super::{geom::Rect, shader::Uniform, window::DeviceSurface};
 
 // TODO :: This camera shit is a mess... REALLY needs a good refactor after
 // we implement 2D rendering.
@@ -121,9 +121,11 @@ pub struct PanCamera {
 }
 
 impl PanCamera {
-    pub fn new(ds: &DeviceSurface, speed: f32, sensitivity: f32) -> Self {
-        let cam = Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
-        let projection = Projection::new(ds.width(), ds.height(), cgmath::Deg(45.0), 0.1, 100.0);
+    pub fn new(viewport: Rect, speed: f32, sensitivity: f32) -> Self {
+        let Rect { x, y, w, h } = viewport;
+        let (w, h) = (w as u32, h as u32);
+        let cam = Camera::new((x, y, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let projection = Projection::new(w, h, cgmath::Deg(45.0), 0.1, 100.0);
         let ctrl = CameraControl::new(speed, sensitivity);
         let uniform = CameraUniform::from_camera(&cam, &projection);
         Self {
