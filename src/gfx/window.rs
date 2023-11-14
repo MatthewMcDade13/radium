@@ -4,15 +4,21 @@ use std::{
     time::Duration,
 };
 
+use anyhow::anyhow;
+
 use wgpu::SurfaceConfiguration;
-use winit::{dpi::PhysicalSize, window::WindowId};
+use winit::{
+    dpi::PhysicalSize,
+    event_loop::EventLoop,
+    window::{WindowBuilder, WindowId},
+};
 
 use crate::eng::app::MouseState;
 
 use super::{
     camera::PanCamera,
     draw::DrawCtx,
-    geom::Rect,
+    geom::{QuadBuffer, Rect},
     shader::{Shader, Uniform},
     wgpu_util::{
         texture::{Texture, TextureType},
@@ -51,13 +57,11 @@ pub struct RenderWindow {
 
     size: winit::dpi::PhysicalSize<u32>,
     window: Rc<winit::window::Window>,
-    default_shader: Shader,
+    // default_shader: Shader,
 
-    camera: PanCamera,
-
+    // camera: PanCamera,
     depth_texture: Rc<Texture>,
-
-    mouse_state: MouseState,
+    // mouse_state: MouseState,
 }
 
 impl RenderWindow {
@@ -77,9 +81,9 @@ impl RenderWindow {
         self.window.request_redraw()
     }
 
-    pub fn mouse_state(&self) -> MouseState {
-        self.mouse_state
-    }
+    // pub fn mouse_state(&self) -> MouseState {
+    //     self.mouse_state
+    // }
 
     pub async fn new(window: winit::window::Window) -> anyhow::Result<Self> {
         let size = window.inner_size();
@@ -145,46 +149,13 @@ impl RenderWindow {
 
         let device = &surface.device;
 
-        let camera = PanCamera::new(
-            Rect {
-                x: 0.,
-                y: 0.,
-                w: config.width as f32,
-                h: config.height as f32,
-            },
-            4.0,
-            0.4,
-        );
-
         let depth_texture = Rc::new(Texture::depth_texture(
             &device,
             &config,
             "Depth Texture".into(),
         ));
 
-        let white_texture = Rc::new(Texture::from_bytes(
-            &surface.device,
-            surface.queue.as_ref(),
-            &Texture::DEFAULT,
-            TextureType::Diffuse,
-            Some("Default White Texture"),
-        )?);
-
         let surface = Rc::new(surface);
-
-        let shader_src = include_str!("../shaders/sprite.wgsl");
-
-        let default_shader = Shader::new(
-            shader_src,
-            surface.as_ref(),
-            config.format,
-            &[Vertex2D::buffer_layout()],
-            &[
-                Uniform::from_texture(surface.as_ref(), &white_texture),
-                camera.create_uniform(surface.as_ref()),
-            ],
-            Some("Default Sprite Shader"),
-        );
 
         let window = Rc::new(window);
 
@@ -192,12 +163,10 @@ impl RenderWindow {
             device_surface: surface,
             size,
             window,
-            camera,
-            depth_texture,
-            default_shader,
-            config,
 
-            mouse_state: MouseState::Idle,
+            depth_texture,
+
+            config,
         };
         Ok(s)
     }
@@ -216,15 +185,11 @@ impl RenderWindow {
                 .surface
                 .configure(&self.device_surface.device, &self.config);
             self.depth_texture = {
-                let c = self.config;
+                let c = &self.config;
                 let t =
-                    Texture::depth_texture(self.device_surface.handle(), &c, Some("Depth Texture"));
+                    Texture::depth_texture(self.device_surface.handle(), c, Some("Depth Texture"));
                 Rc::new(t)
             }
         }
-
-        self.camera
-            .projection
-            .resize(new_size.width, new_size.height);
     }
 }

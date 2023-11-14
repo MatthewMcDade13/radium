@@ -1,6 +1,8 @@
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
 use wgpu::{util::DeviceExt, VertexAttribute};
+
+use crate::gfx::window::DeviceSurface;
 const TEMP: u32 = 0;
 
 pub struct Instance {
@@ -35,5 +37,89 @@ impl InstanceRaw {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &Self::ATTRIBS,
         }
+    }
+}
+
+pub enum BufferType {
+    Index,
+    Vertex,
+}
+
+pub struct StagingBuffer {
+    pub buf: Rc<wgpu::Buffer>,
+    pub size: wgpu::BufferAddress,
+}
+
+impl StagingBuffer {
+    pub fn new<T>(ds: &DeviceSurface, data: &[T], buffer_type: BufferType) -> Self
+    where
+        T: bytemuck::Pod + Sized,
+    {
+        let usage = wgpu::BufferUsages::COPY_SRC
+            | match buffer_type {
+                BufferType::Index => wgpu::BufferUsages::INDEX,
+                BufferType::Vertex => wgpu::BufferUsages::VERTEX,
+            };
+        let buf = ds
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Staging Buffer"),
+                contents: bytemuck::cast_slice(data),
+                usage,
+            });
+
+        let buf = Rc::new(buf);
+        let size = (std::mem::size_of::<T>() * data.len()) as u64;
+
+        Self { buf, size }
+    }
+}
+
+pub struct GpuBuffer {
+    pub buf: Rc<wgpu::Buffer>,
+    pub size: wgpu::BufferAddress,
+}
+
+impl GpuBuffer {
+    pub fn new<T>(ds: &DeviceSurface, data: &[T], buffer_type: BufferType) -> Self
+    where
+        T: bytemuck::Pod + Sized,
+    {
+        let usage = wgpu::BufferUsages::COPY_DST
+            | match buffer_type {
+                BufferType::Index => wgpu::BufferUsages::INDEX,
+                BufferType::Vertex => wgpu::BufferUsages::VERTEX,
+            };
+        let buf = ds
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Gpu Buffer"),
+                contents: bytemuck::cast_slice(data),
+                usage,
+            });
+
+        let buf = Rc::new(buf);
+        let size = (std::mem::size_of::<T>() * data.len()) as u64;
+
+        Self { buf, size }
+    }
+
+    pub fn empty(ds: &DeviceSurface, size: u64, buffer_type: BufferType) -> Self {
+        let usage = wgpu::BufferUsages::COPY_DST
+            | match buffer_type {
+                BufferType::Index => wgpu::BufferUsages::INDEX,
+                BufferType::Vertex => wgpu::BufferUsages::VERTEX,
+            };
+        let buf = ds.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+
+            usage,
+            size,
+            mapped_at_creation: false,
+        });
+
+        let buf = Rc::new(buf);
+
+        Self { buf, size }
     }
 }

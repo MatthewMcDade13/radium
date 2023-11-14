@@ -4,7 +4,15 @@ use wgpu::{BufferAddress, DynamicOffset, IndexFormat};
 
 use crate::eng::command::{EncoderCommand, GpuCommand, RenderPass, RenderPassOp};
 
-use super::{wgpu_util::texture::Texture, window::DeviceSurface};
+use super::{
+    geom::QuadBuffer,
+    shader::Shader,
+    wgpu_util::{
+        buffer::{BufferType, StagingBuffer},
+        texture::Texture,
+    },
+    window::DeviceSurface,
+};
 
 pub struct DrawCtx {
     passes: Vec<RenderPass>,
@@ -201,5 +209,31 @@ impl DrawCtx {
                 indirect_buffer.clone(),
                 indirect_offset,
             ));
+    }
+
+    pub fn use_shader(&mut self, shader: &Shader) {
+        for (i, u) in shader.uniforms.iter().enumerate() {
+            self.set_bind_group(i as u32, &u.bgroup, None);
+        }
+        self.set_pipeline(&shader.pipeline);
+    }
+
+    /// Uses Vertex Buffer slot 0. Assumes we are not using instancing.
+    /// also creates a Stagingbuffer so we can send CPU data in Quadbuffer to GPU.
+    pub fn draw_quad_buffer(&mut self, qb: &QuadBuffer) {
+        let device = self.device.as_ref();
+
+        // TODO/WARN :: This might not work or at the very least is really slow... We are creating a new
+        // buffer (potentiall every frame) and sending that newly created buffer to the GPU.
+        // Ideally we already have a vert/index buffer on the renderer that we should be copying
+        // to...
+        let vert_sb = StagingBuffer::new(device, qb.vertex_buffer(), BufferType::Vertex);
+        let index_sb = StagingBuffer::new(device, qb.index_buffer(), BufferType::Index);
+
+        let indices = qb.index_buffer().len() as u32;
+
+        self.set_vertex_buffer(0, &vert_sb.buf);
+        self.set_index_buffer(&index_sb.buf, IndexFormat::Uint32);
+        self.draw_indexed(0..indices, 0, 0..1);
     }
 }

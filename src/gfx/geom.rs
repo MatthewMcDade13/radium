@@ -56,8 +56,8 @@ impl Quad {
 #[derive(Debug, Clone)]
 pub struct QuadBuffer {
     vert_buf: Vec<Vertex2D>,
-    index_buf: Vec<usize>,
-    current: usize,
+    index_buf: Vec<u32>,
+    current: u32,
 }
 
 impl QuadBuffer {
@@ -97,6 +97,14 @@ impl QuadBuffer {
             self.current * 4 + 3,
         ]);
         self.current += 1;
+    }
+
+    pub fn vertex_buffer(&self) -> &[Vertex2D] {
+        self.vert_buf.as_slice()
+    }
+
+    pub fn index_buffer(&self) -> &[u32] {
+        self.index_buf.as_slice()
     }
 }
 

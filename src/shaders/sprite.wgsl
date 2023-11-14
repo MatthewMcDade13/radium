@@ -12,12 +12,6 @@ struct VertexInput {
   @location(1) tex_coords: vec2<f32>
 }
 
-struct InstanceInput {
-  @location(5) model_matrix0: vec4<f32>,
-  @location(6) model_matrix1: vec4<f32>,
-  @location(7) model_matrix2: vec4<f32>,
-  @location(8) model_matrix3: vec4<f32>,
-}
 
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
@@ -27,19 +21,12 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(
-  mode: VertexInput,
-  instance: InstanceInput,
+  model: VertexInput,
 ) -> VertexOutput {
-  let model_matrix = mat4x4<f32>(
-    instance.model_matrix0,
-    instance.model_matrix1,
-    instance.model_matrix2,
-    instance.model_matrix3,
-  );
 
   var out: VertexOutput;
   out.tex_coords = model.tex_coords;
-  out.clip_position = camera.view_proj * model_matrix * vec4<f32>(model.position, 1.0);
+  out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
   return out;
 }
 

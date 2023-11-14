@@ -9,14 +9,12 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::gfx::{self, draw::DrawCtx, window::RenderWindow};
+use crate::gfx::{draw::DrawCtx, window::RenderWindow};
 
 use super::command::RenderPassOp;
 
 pub trait RadApp {
-    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) -> InputEventStatus {
-        InputEventStatus::Done
-    }
+    fn process_keyboard(&mut self, key: VirtualKeyCode, state: ElementState) {}
 
     fn process_mouse(&mut self, mouse_dx: f64, mouse_dy: f64) {}
     fn process_scroll(&mut self, delta: &MouseScrollDelta) {}
@@ -52,19 +50,15 @@ impl From<InputEventStatus> for bool {
 
 pub struct Radium;
 impl Radium {
-    pub async fn start<A, F, Fut>(factory: F) -> anyhow::Result<()>
+    pub async fn start<A>(mut app: A) -> anyhow::Result<()>
     where
         A: RadApp + 'static,
-        F: Fn(RadWindow) -> Fut,
-        Fut: Future<Output = anyhow::Result<A>>,
     {
         let event_loop = EventLoop::new();
         let window = WindowBuilder::new().build(&event_loop)?;
-        let mut render_window = RadWindow::new(window).await?;
+        let mut render_window = RenderWindow::new(window).await?;
 
         let mut last_dt = std::time::Instant::now();
-
-        let mut app = factory(render_window.clone()).await?;
 
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
@@ -76,18 +70,18 @@ impl Radium {
                 } if window_id == render_window.id() => match app.handle_window_events(event) {
                     InputEventStatus::Processing => {}
                     InputEventStatus::Done => match event {
-                        WindowEvent::CloseRequested
-                        | WindowEvent::KeyboardInput {
+                        WindowEvent::CloseRequested => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        WindowEvent::KeyboardInput {
                             input:
                                 KeyboardInput {
-                                    state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    state,
+                                    virtual_keycode: Some(keycode),
                                     ..
                                 },
                             ..
-                        } => {
-                            *control_flow = ControlFlow::Exit;
-                        }
+                        } => app.process_keyboard(*keycode, *state),
                         WindowEvent::Resized(physical_size) => {
                             render_window.resize(*physical_size);
                         }
@@ -125,15 +119,28 @@ impl Radium {
                 Event::MainEventsCleared => {
                     render_window.request_redraw();
                 }
-                Event::DeviceEvent {
-                    event: DeviceEvent::MouseMotion { delta },
-                    ..
-                } => match render_window.mouse_state() {
-                    MouseState::Pressed => app.process_mouse(delta.0, delta.1),
-                    _ => {}
-                },
+                // Event::DeviceEvent {
+                //     event: DeviceEvent::MouseMotion { delta },
+                //     ..
+                // } => match render_window.mouse_state() {
+                //     MouseState::Pressed => app.process_mouse(delta.0, delta.1),
+                //     _ => {}
+                // },
                 _ => {}
             }
         });
     }
+
+    // pub fn start_sdl() -> Result<(), String> {
+    //     let sdl_ctx = sdl2::init()?;
+    //     let video = sdl_ctx.video()?;
+    //     let window = video
+    //         .window("Radium Window", 800, 600)
+    //         .position_centered()
+    //         .resizable()
+    //         .vulkan()
+    //         .build()
+    //         .map_err(|e| e.to_string())?;
+    //     let (width, height) = window.size();
+    // }
 }

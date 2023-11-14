@@ -62,41 +62,6 @@ pub fn create_render_pipeline(
     })
 }
 
-pub enum BufferType {
-    Index,
-    Vertex,
-}
-
-pub struct StagingBuffer {
-    pub buf: Rc<wgpu::Buffer>,
-    pub size: wgpu::BufferAddress,
-}
-
-impl StagingBuffer {
-    pub fn new<T>(ds: &DeviceSurface, data: &[T], buffer_type: BufferType) -> Self
-    where
-        T: bytemuck::Pod + Sized,
-    {
-        let usage = wgpu::BufferUsages::COPY_SRC
-            | match buffer_type {
-                BufferType::Index => wgpu::BufferUsages::INDEX,
-                BufferType::Vertex => wgpu::BufferUsages::VERTEX,
-            };
-        let buf = ds
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Staging Buffer"),
-                contents: bytemuck::cast_slice(data),
-                usage,
-            });
-
-        let buf = Rc::new(buf);
-        let size = (std::mem::size_of::<T>() * data.len()) as u64;
-
-        Self { buf, size }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum UniformData {
     Texture(Rc<Texture>),
@@ -256,15 +221,18 @@ impl Uniform {
 }
 
 use super::{
-    wgpu_util::texture::{Texture, TextureType},
+    wgpu_util::{
+        buffer::StagingBuffer,
+        texture::{Texture, TextureType},
+    },
     window::DeviceSurface,
 };
 
 #[derive(Debug, Clone)]
 pub struct Shader {
     pub pipeline: Rc<wgpu::RenderPipeline>,
-    uniforms: Vec<Uniform>,
-    vert_layouts: Vec<VertexBufferLayout<'static>>,
+    pub uniforms: Vec<Uniform>,
+    // vert_layouts: Vec<VertexBufferLayout<'static>>,
 }
 
 impl Shader {
@@ -309,7 +277,7 @@ impl Shader {
         Self {
             pipeline,
             uniforms,
-            vert_layouts,
+            // vert_layouts,
         }
     }
 
@@ -319,17 +287,17 @@ impl Shader {
         src: &StagingBuffer,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let dst = self.uniform(uniform_index);
+        let dst = &self.uniforms[uniform_index];
         dst.write_buffer(src, encoder);
     }
 
-    pub fn uniform(&self, index: usize) -> Uniform {
-        assert!(index < self.uniforms.len());
-        self.uniforms[index].clone()
-    }
+    // pub fn uniform(&self, index: usize) -> Uniform {
+    //     assert!(index < self.uniforms.len());
+    //     self.uniforms[index].clone()
+    // }
 
-    pub fn activate(&self, cq: &mut CommandQueue) {
-        cq.draw_commands
-            .push(GpuCommand::SetPipeline(self.pipeline.clone()));
-    }
+    // pub fn activate(&self, cq: &mut CommandQueue) {
+    //     cq.draw_commands
+    //         .push(GpuCommand::SetPipeline(self.pipeline.clone()));
+    // }
 }

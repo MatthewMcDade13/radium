@@ -15,7 +15,7 @@ pub struct Texture {
 
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-    pub const DEFAULT: [u8; 16] = [0xFF; 16];
+    pub const DEFAULT: [u8; 11138] = *include_bytes!("../../../public/white_texture.jpg");
 
     pub fn depth_texture(
         device: &wgpu::Device,
